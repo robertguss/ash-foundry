@@ -30,9 +30,12 @@ defmodule __MODULE__.Organizations.Organization do
 
     policy action_type(:create) do
       forbid_unless actor_present()
-__IF_SAAS__
+__IF_OPEN_ORG_CREATE__
       authorize_if always()
-__END_SAAS__
+__END_OPEN_ORG_CREATE__
+__IF_ADMIN_ORG_CREATE__
+      authorize_if actor_attribute_equals(:system_admin, true)
+__END_ADMIN_ORG_CREATE__
     end
 
     policy action_type(:update) do

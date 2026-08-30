@@ -1,12 +1,7 @@
 defmodule AshFoundry.Plan do
   @moduledoc "Validated, deterministic input to AshFoundry generation."
 
-  alias AshFoundry.Recipe
-
-  @auth_methods [:google, :password, :magic_link]
-  @registrations [:open, :invite_only, :closed]
-  @tenancies [:none, :organizations]
-  @deployments [:render, :fly, :none]
+  alias AshFoundry.Selection
 
   @enforce_keys [
     :app,
@@ -17,16 +12,18 @@ defmodule AshFoundry.Plan do
     :tenancy,
     :deploy,
     :google_hosted_domain,
+    :organization_creation,
     :session_absolute_minutes,
     :session_idle_minutes
   ]
   defstruct @enforce_keys
 
-  @type recipe :: :internal | :saas | :personal | :custom
-  @type auth_method :: :google | :password | :magic_link
-  @type registration :: :open | :invite_only | :closed
-  @type tenancy :: :none | :organizations
-  @type deployment :: :render | :fly | :none
+  @type recipe :: Selection.recipe()
+  @type auth_method :: Selection.auth_method()
+  @type registration :: Selection.registration()
+  @type tenancy :: Selection.tenancy()
+  @type deployment :: Selection.deployment()
+  @type organization_creation :: Selection.organization_creation()
   @type t :: %__MODULE__{
           app: String.t(),
           module: String.t(),
@@ -36,6 +33,7 @@ defmodule AshFoundry.Plan do
           tenancy: tenancy(),
           deploy: deployment(),
           google_hosted_domain: boolean(),
+          organization_creation: organization_creation(),
           session_absolute_minutes: pos_integer(),
           session_idle_minutes: pos_integer()
         }
@@ -44,15 +42,17 @@ defmodule AshFoundry.Plan do
   @spec build(String.t(), keyword()) :: {:ok, t()} | {:error, String.t()}
   def build(app, options) when is_binary(app) and is_list(options) do
     with :ok <- validate_app(app),
-         {:ok, recipe} <- enum(options[:recipe], Recipe.all(), "recipe"),
-         defaults = Recipe.defaults(recipe),
-         {:ok, auth} <- auth(options[:auth], defaults, recipe),
-         {:ok, registration} <- selected(options, defaults, recipe, :registration, @registrations),
-         {:ok, tenancy} <- selected(options, defaults, recipe, :tenancy, @tenancies),
-         {:ok, deploy} <- enum(options[:deploy], @deployments, "deploy"),
-         :ok <- validate_combination(auth, registration, tenancy, options) do
+         {:ok, recipe} <- Selection.enum(options[:recipe], Selection.recipes(), "recipe"),
+         defaults = Selection.defaults(recipe),
+         {:ok, auth} <- Selection.auth(options[:auth], defaults, recipe),
+         {:ok, registration} <-
+           Selection.selected(options, defaults, recipe, :registration, Selection.registrations()),
+         {:ok, tenancy} <-
+           Selection.selected(options, defaults, recipe, :tenancy, Selection.tenancies()),
+         {:ok, deploy} <- Selection.enum(options[:deploy], Selection.deployments(), "deploy"),
+         :ok <- Selection.validate_combination(auth, registration, tenancy, options) do
       module = options[:ash_foundry_module] || options[:module] || Macro.camelize(app)
-      hosted_domain = hosted_domain?(options, defaults, auth)
+      {absolute, idle} = Selection.session_minutes(defaults)
 
       {:ok,
        %__MODULE__{
@@ -63,9 +63,10 @@ defmodule AshFoundry.Plan do
          registration: registration,
          tenancy: tenancy,
          deploy: deploy,
-         google_hosted_domain: hosted_domain,
-         session_absolute_minutes: defaults[:session_absolute_minutes] || 30 * 24 * 60,
-         session_idle_minutes: defaults[:session_idle_minutes] || 12 * 60
+         google_hosted_domain: Selection.hosted_domain?(options, defaults, auth),
+         organization_creation: Selection.organization_creation(recipe, tenancy),
+         session_absolute_minutes: absolute,
+         session_idle_minutes: idle
        }}
     end
   end
@@ -79,6 +80,10 @@ defmodule AshFoundry.Plan do
     end
   end
 
+  @doc "True when the CLI selection will generate authentication."
+  @spec auth_enabled?(keyword()) :: boolean()
+  def auth_enabled?(options), do: Selection.auth_enabled?(options)
+
   @doc "Returns the complete deterministic CLI arguments for a plan."
   @spec cli_args(t()) :: [String.t()]
   def cli_args(plan) do
@@ -91,7 +96,7 @@ defmodule AshFoundry.Plan do
       "--auth",
       auth_string(plan.auth),
       "--registration",
-      dashed(plan.registration),
+      Selection.dashed(plan.registration),
       "--tenancy",
       Atom.to_string(plan.tenancy),
       "--deploy",
@@ -115,6 +120,7 @@ defmodule AshFoundry.Plan do
       tenancy: plan.tenancy,
       deploy: plan.deploy,
       google_hosted_domain: plan.google_hosted_domain,
+      organization_creation: plan.organization_creation,
       session_absolute_minutes: plan.session_absolute_minutes,
       session_idle_minutes: plan.session_idle_minutes
     ]
@@ -131,91 +137,6 @@ defmodule AshFoundry.Plan do
     end
   end
 
-  defp auth(nil, defaults, :custom) when map_size(defaults) == 0,
-    do: {:error, "custom recipe requires --auth (google,password,magic-link, or none)"}
-
-  defp auth(nil, defaults, _recipe), do: {:ok, defaults.auth}
-  defp auth("none", _defaults, _recipe), do: {:ok, []}
-  defp auth(:none, _defaults, _recipe), do: {:ok, []}
-
-  defp auth(value, _defaults, _recipe) when is_binary(value) do
-    methods =
-      value
-      |> String.split(",", trim: true)
-      |> Enum.map(&(&1 |> String.replace("-", "_") |> String.to_existing_atom()))
-      |> Enum.uniq()
-
-    if methods != [] and Enum.all?(methods, &(&1 in @auth_methods)) do
-      {:ok, methods}
-    else
-      {:error, "auth must be a comma-separated subset of google,password,magic-link or none"}
-    end
-  rescue
-    ArgumentError ->
-      {:error, "auth must be a comma-separated subset of google,password,magic-link or none"}
-  end
-
-  defp auth(value, _defaults, _recipe) when is_list(value) do
-    if value != [] and Enum.all?(value, &(&1 in @auth_methods)) do
-      {:ok, Enum.uniq(value)}
-    else
-      {:error, "invalid auth selection"}
-    end
-  end
-
-  defp selected(options, _defaults, :custom, key, allowed) do
-    case options[key] do
-      nil -> {:error, "custom recipe requires --#{dashed(key)}"}
-      value -> enum(value, allowed, Atom.to_string(key))
-    end
-  end
-
-  defp selected(options, defaults, _recipe, key, allowed),
-    do: enum(options[key] || defaults[key], allowed, Atom.to_string(key))
-
-  defp enum(nil, _allowed, name), do: {:error, "--#{dashed(name)} is required"}
-
-  defp enum(value, allowed, name) when is_atom(value) do
-    if value in allowed do
-      {:ok, value}
-    else
-      {:error, "#{name} must be one of #{Enum.map_join(allowed, ", ", &dashed/1)}"}
-    end
-  end
-
-  defp enum(value, allowed, name) when is_binary(value) do
-    normalized = String.replace(value, "-", "_")
-
-    case Enum.find(allowed, &(Atom.to_string(&1) == normalized)) do
-      nil -> {:error, "#{name} must be one of #{Enum.map_join(allowed, ", ", &dashed/1)}"}
-      match -> {:ok, match}
-    end
-  end
-
-  defp enum(_value, allowed, name),
-    do: {:error, "#{name} must be one of #{Enum.map_join(allowed, ", ", &dashed/1)}"}
-
-  defp validate_combination([], _registration, :organizations, _options),
-    do: {:error, "no-auth applications do not support organization tenancy"}
-
-  defp validate_combination([], registration, _tenancy, _options) when registration != :closed,
-    do: {:error, "no-auth applications require --registration closed"}
-
-  defp validate_combination(auth, _registration, _tenancy, options) do
-    if options[:google_hosted_domain] == true and :google not in auth do
-      {:error, "--google-hosted-domain requires google authentication"}
-    else
-      :ok
-    end
-  end
-
-  defp hosted_domain?(options, defaults, auth) do
-    :google in auth and
-      Keyword.get(options, :google_hosted_domain, defaults[:google_hosted_domain] || false)
-  end
-
   defp auth_string([]), do: "none"
-  defp auth_string(methods), do: Enum.map_join(methods, ",", &dashed/1)
-  defp dashed(value) when is_atom(value), do: value |> Atom.to_string() |> dashed()
-  defp dashed(value) when is_binary(value), do: String.replace(value, "_", "-")
+  defp auth_string(methods), do: Enum.map_join(methods, ",", &Selection.dashed/1)
 end

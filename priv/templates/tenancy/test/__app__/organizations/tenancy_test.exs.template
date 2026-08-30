@@ -99,7 +99,63 @@ defmodule __MODULE__.Organizations.TenancyTest do
     assert user_id == invitee.id
   end
 
-__IF_NOT_SAAS__
+  test "a deactivated member can accept a later invitation to the same organization" do
+    owner = create_user("owner@example.com")
+    member = create_user("returning@example.com")
+
+    assert {:ok, organization} =
+             create_organization(owner, %{name: "Returning", slug: "returning"})
+
+    create_membership(member, organization, :member)
+
+    [membership] =
+      Membership
+      |> Ash.Query.filter_input(user_id: member.id)
+      |> Ash.read!(actor: owner, tenant: organization)
+
+    assert {:ok, _deactivated} =
+             membership
+             |> Ash.Changeset.for_update(:deactivate, %{}, actor: owner, tenant: organization)
+             |> Ash.update(actor: owner, tenant: organization)
+
+    assert {:ok, url} =
+             Accounts.issue_invitation(
+               %{
+                 email: "returning@example.com",
+                 kind: :membership,
+                 role: :admin,
+                 organization_id: organization.id,
+                 expires_in: 3600
+               },
+               owner
+             )
+
+    %{"id" => invitation_id, "token" => token} =
+      url |> URI.parse() |> Map.fetch!(:fragment) |> URI.decode_query()
+
+    assert {:ok, %{id: ^invitation_id}} = Accounts.verify_invitation(invitation_id, token)
+    assert {:ok, ^member} = Accounts.complete_invitation(invitation_id, member)
+
+    assert [%{role: :admin, active: true, user_id: user_id}] =
+             Membership
+             |> Ash.Query.filter_input(user_id: member.id)
+             |> Ash.read!(actor: member, tenant: organization)
+
+    assert user_id == member.id
+  end
+
+  test "system administrators can read organizations they do not belong to" do
+    owner = create_user("owner@example.com")
+    system_admin = create_user("break-glass@example.com", true)
+
+    assert {:ok, organization} =
+             create_organization(owner, %{name: "Break Glass", slug: "break-glass"})
+
+    visible_ids = Organization |> Ash.read!(actor: system_admin) |> Enum.map(& &1.id)
+    assert organization.id in visible_ids
+  end
+
+__IF_ADMIN_ORG_CREATE__
   test "organization creation is restricted to system administrators" do
     ordinary_user = create_user("ordinary@example.com")
     system_admin = create_user("system-admin@example.com", true)
@@ -116,13 +172,13 @@ __IF_NOT_SAAS__
                slug: "allowed"
              })
   end
-__END_NOT_SAAS__
+__END_ADMIN_ORG_CREATE__
 
-__IF_SAAS__
+__IF_OPEN_ORG_CREATE__
   defp create_organization(owner, attributes),
     do: Organizations.create_organization(owner, attributes)
-__END_SAAS__
-__IF_NOT_SAAS__
+__END_OPEN_ORG_CREATE__
+__IF_ADMIN_ORG_CREATE__
   defp create_organization(owner, attributes) do
     system_admin = create_user("system-admin-#{attributes.slug}@example.com", true)
 
@@ -141,7 +197,7 @@ __IF_NOT_SAAS__
       {:ok, organization}
     end
   end
-__END_NOT_SAAS__
+__END_ADMIN_ORG_CREATE__
 
   defp create_user(email, system_admin \\ false) do
     id = Ash.UUIDv7.generate()

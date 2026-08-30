@@ -4,7 +4,7 @@ defmodule __MODULE__.RateLimit do
 end
 
 defmodule __WEB_MODULE__.Plugs.AuthRateLimit do
-  @moduledoc "Fails sensitive routes closed under both trusted-IP and normalized-identifier limits."
+  @moduledoc "Fails sensitive routes closed under trusted-IP and, when present, normalized-identifier limits."
   import Plug.Conn
 
   @window_milliseconds :timer.seconds(60)
@@ -14,12 +14,10 @@ defmodule __WEB_MODULE__.Plugs.AuthRateLimit do
   def init(options), do: options
 
   def call(conn, _options) do
-    ip_key = "auth:ip:" <> hash(:inet.ntoa(conn.remote_ip) |> to_string())
-    identifier_key = "auth:id:" <> hash(identifier(conn.params))
+    ip_key = "auth:ip:" <> hash(ip_string(conn))
 
     with {:allow, _count} <- __MODULE__.RateLimit.hit(ip_key, @window_milliseconds, @ip_limit),
-         {:allow, _count} <-
-           __MODULE__.RateLimit.hit(identifier_key, @window_milliseconds, @identifier_limit) do
+         :ok <- limit_identifier(conn.params) do
       conn
     else
       _denial -> conn |> send_resp(:too_many_requests, "request could not be completed") |> halt()
@@ -30,12 +28,40 @@ defmodule __WEB_MODULE__.Plugs.AuthRateLimit do
     :exit, _reason -> conn |> send_resp(:service_unavailable, "request could not be completed") |> halt()
   end
 
-  defp identifier(params) do
-    params["email"] || get_in(params, ["user", "email"]) || get_in(params, ["password", "email"]) || "anonymous"
-    |> to_string()
-    |> String.trim()
-    |> String.downcase()
+  defp limit_identifier(params) do
+    case identifier_email(params) do
+      nil ->
+        :ok
+
+      email ->
+        case __MODULE__.RateLimit.hit(
+               "auth:id:" <> hash(email),
+               @window_milliseconds,
+               @identifier_limit
+             ) do
+          {:allow, _count} -> :ok
+          denial -> denial
+        end
+    end
   end
+
+  defp identifier_email(params) do
+    value =
+      params["email"] || get_in(params, ["user", "email"]) || get_in(params, ["password", "email"])
+
+    case value do
+      email when is_binary(email) ->
+        email |> String.trim() |> String.downcase() |> presence()
+
+      _other ->
+        nil
+    end
+  end
+
+  defp presence(""), do: nil
+  defp presence(value), do: value
+
+  defp ip_string(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()
 
   defp hash(value), do: :crypto.hash(:sha256, "__APP__:rate-limit:" <> value) |> Base.url_encode64(padding: false)
 end

@@ -4,15 +4,13 @@ defmodule __WEB_MODULE__.Plugs.LoadOrganization do
 
   def init(options), do: options
 
-  def call(%{path_params: %{"organization_slug" => slug}, assigns: %{current_user: actor}} = conn, _options) do
+  def call(%{path_params: %{"organization_slug" => slug}, assigns: %{current_user: actor}} = conn, _options)
+      when not is_nil(actor) do
     with {:ok, [organization]} <-
            __MODULE__.Organizations.Organization
            |> Ash.Query.filter_input(slug: slug)
            |> Ash.read(actor: actor),
-         {:ok, [membership]} <-
-           __MODULE__.Organizations.Membership
-           |> Ash.Query.filter_input(user_id: actor.id, active: true)
-           |> Ash.read(tenant: organization.id, actor: actor) do
+         {:ok, membership} <- membership_for(organization, actor) do
       conn
       |> assign(:current_organization, organization)
       |> assign(:current_membership, membership)
@@ -23,4 +21,26 @@ defmodule __WEB_MODULE__.Plugs.LoadOrganization do
   end
 
   def call(conn, _options), do: conn |> send_resp(:not_found, "not found") |> halt()
+
+  defp membership_for(organization, %{system_admin: true} = actor) do
+    case active_membership(organization, actor) do
+      {:ok, [membership]} -> {:ok, membership}
+      {:ok, []} -> {:ok, %{role: :system_admin, user_id: actor.id, active: true}}
+      error -> error
+    end
+  end
+
+  defp membership_for(organization, actor) do
+    case active_membership(organization, actor) do
+      {:ok, [membership]} -> {:ok, membership}
+      {:ok, []} -> {:error, :not_found}
+      error -> error
+    end
+  end
+
+  defp active_membership(organization, actor) do
+    __MODULE__.Organizations.Membership
+    |> Ash.Query.filter_input(user_id: actor.id, active: true)
+    |> Ash.read(tenant: organization.id, actor: actor)
+  end
 end

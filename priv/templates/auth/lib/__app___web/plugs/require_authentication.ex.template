@@ -5,7 +5,9 @@ defmodule __WEB_MODULE__.Plugs.RequireAuthentication do
 
   def init(options), do: options
 
-  def call(%{assigns: %{current_user: %{status: :active}}} = conn, _options), do: conn
+  def call(%{assigns: %{current_user: %{status: :active, confirmed_at: confirmed_at}}} = conn, _options)
+      when not is_nil(confirmed_at),
+      do: conn
 
   def call(conn, _options) do
     conn

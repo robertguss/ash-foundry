@@ -55,12 +55,9 @@ __END_TENANCY__
 
     auth_routes AuthController, __MODULE__.Accounts.User, path: "/auth"
     get "/sign-in", AuthenticationPageController, :sign_in
-__IF_OPEN_REGISTRATION__
+__IF_REGISTRATION_ENABLED__
     get "/register", AuthenticationPageController, :register
-__END_OPEN_REGISTRATION__
-__IF_INVITE_ONLY__
-    get "/register", AuthenticationPageController, :register
-__END_INVITE_ONLY__
+__END_REGISTRATION_ENABLED__
 __IF_PASSWORD__
     get "/password-reset/:token", AuthenticationPageController, :password_reset
 __END_PASSWORD__

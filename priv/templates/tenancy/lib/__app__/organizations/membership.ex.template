@@ -20,7 +20,14 @@ defmodule __MODULE__.Organizations.Membership do
   actions do
     read :read, primary?: true
     read :read_all, multitenancy: :allow_global
-    create :create, accept: [:user_id, :role]
+
+    create :create do
+      accept [:user_id, :role]
+      upsert? true
+      upsert_identity :unique_organization_user
+      upsert_fields [:role, :active]
+      change set_attribute(:active, true)
+    end
 
     update :change_role do
       require_atomic? false
