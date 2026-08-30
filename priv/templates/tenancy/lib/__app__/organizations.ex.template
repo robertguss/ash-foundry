@@ -1,0 +1,35 @@
+defmodule __MODULE__.Organizations do
+  @moduledoc "Explicit URL-scoped organization tenancy and membership roles."
+  use Ash.Domain, otp_app: :__APP__
+
+  resources do
+    resource __MODULE__.Organizations.Organization
+    resource __MODULE__.Organizations.Membership
+  end
+
+  @spec create_organization(struct(), map()) :: {:ok, __MODULE__.Organizations.Organization.t()} | {:error, term()}
+  def create_organization(actor, attributes) do
+    __MODULE__.Repo.transaction(fn ->
+      with {:ok, organization, organization_notifications} <-
+             __MODULE__.Organizations.Organization
+             |> Ash.Changeset.for_create(:create, attributes)
+             |> Ash.create(actor: actor, return_notifications?: true),
+           {:ok, _membership, membership_notifications} <-
+             __MODULE__.Organizations.Membership
+             |> Ash.Changeset.for_create(:create, %{user_id: actor.id, role: :owner})
+             |> Ash.Changeset.set_tenant(organization.id)
+             |> Ash.create(authorize?: false, return_notifications?: true) do
+        {organization, organization_notifications ++ membership_notifications}
+      else
+        {:error, error} -> __MODULE__.Repo.rollback(error)
+      end
+    end)
+    |> case do
+      {:ok, {organization, notifications}} ->
+        Ash.Notifier.notify(notifications)
+        {:ok, organization}
+
+      {:error, reason} -> {:error, reason}
+    end
+  end
+end

@@ -1,0 +1,66 @@
+__IF_AUTH__
+import { Head, Link } from "@inertiajs/react";
+import { Badge, Button, Card, Grid, Group, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+__END_AUTH__
+__IF_NO_AUTH__
+import { Head } from "@inertiajs/react";
+import { Badge, Card, Grid, Group, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+__END_NO_AUTH__
+
+import { AppLayout } from "@/components/AppLayout";
+import classes from "./Dashboard.module.css";
+
+export type DashboardProps = {
+  analytics: Array<{ label: string; value: number | string }>;
+  authenticated: boolean;
+  recipe: string;
+};
+
+export default function Dashboard({ analytics, authenticated, recipe }: DashboardProps) {
+  return (
+    <AppLayout>
+      <Head title="Dashboard" />
+      <section className={classes.hero}>
+        <div>
+          <Text className={classes.eyebrow}>AshFoundry · {recipe}</Text>
+          <Title order={1}>{authenticated ? "Dashboard" : "Welcome"}</Title>
+          <Text c="dimmed" maw={650} mt="sm">
+            A small application-owned shell for Ash policies, explicit Inertia presenters, durable work, and privacy-conscious operations.
+          </Text>
+        </div>
+        <Group>
+          <Badge color="green" variant="light">System healthy</Badge>
+__IF_AUTH__
+          {!authenticated ? <Button component={Link} href="/sign-in">Sign in</Button> : null}
+__END_AUTH__
+        </Group>
+      </section>
+
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} mb="xl">
+        {analytics.map((metric) => (
+          <Card className={classes.card} key={metric.label} padding="lg" radius="lg">
+            <Text c="dimmed" size="sm">{metric.label}</Text>
+            <Text fw={750} mt={4} size="xl">{metric.value}</Text>
+          </Card>
+        ))}
+      </SimpleGrid>
+
+      <Grid>
+        <Grid.Col span={{ base: 12, md: 7 }}>
+          <Card className={classes.card} padding="xl" radius="lg">
+            <Stack gap="xs">
+              <Title order={2} size="h3">Start with canonical facts</Title>
+              <Text c="dimmed">Add domain resources and projection modules; do not turn analytics into a generic event warehouse.</Text>
+            </Stack>
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, md: 5 }}>
+          <Card className={classes.card} padding="xl" radius="lg">
+            <Title order={2} size="h3">Operational baseline</Title>
+            <Text c="dimmed" mt="xs">Readiness checks PostgreSQL and packaged migrations. Jobs, email, feedback, and audit evidence stay server-side.</Text>
+          </Card>
+        </Grid.Col>
+      </Grid>
+    </AppLayout>
+  );
+}

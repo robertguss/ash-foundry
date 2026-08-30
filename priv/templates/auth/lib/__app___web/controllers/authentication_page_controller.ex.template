@@ -1,0 +1,46 @@
+defmodule __WEB_MODULE__.AuthenticationPageController do
+  use __WEB_MODULE__, :controller
+
+  def sign_in(conn, _params), do: render_page(conn, :sign_in)
+
+__IF_OPEN_REGISTRATION__
+  def register(conn, _params), do: render_page(conn, :register)
+__END_OPEN_REGISTRATION__
+__IF_INVITE_ONLY__
+  def register(conn, _params), do: render_page(conn, :register)
+__END_INVITE_ONLY__
+
+__IF_PASSWORD__
+  def password_reset(conn, %{"token" => token}), do: render_page(conn, :password_reset, token)
+__END_PASSWORD__
+__IF_MAGIC_LINK__
+  def magic_link(conn, %{"token" => token}), do: render_page(conn, :magic_link, token)
+__END_MAGIC_LINK__
+__IF_EMAIL_AUTH__
+  def confirmation(conn, %{"token" => token}), do: render_page(conn, :confirmation, token)
+__END_EMAIL_AUTH__
+
+  defp render_page(conn, mode, token \\ nil) do
+    props =
+      __WEB_MODULE__.DashboardPresenter.shared(conn)
+      |> Map.merge(%{
+        csrf_token: get_csrf_token(),
+        methods: [
+__IF_GOOGLE__
+          "google",
+__END_GOOGLE__
+__IF_PASSWORD__
+          "password",
+__END_PASSWORD__
+__IF_MAGIC_LINK__
+          "magic_link",
+__END_MAGIC_LINK__
+        ],
+        mode: mode,
+        registration_enabled: __REGISTRATION_ENABLED__,
+        token: token
+      })
+
+    render_inertia(conn, "Authentication", props)
+  end
+end

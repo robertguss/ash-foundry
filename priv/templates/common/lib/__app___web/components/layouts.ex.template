@@ -1,0 +1,6 @@
+defmodule __WEB_MODULE__.Layouts do
+  @moduledoc false
+  use __WEB_MODULE__, :html
+
+  embed_templates "layouts/*"
+end

@@ -1,0 +1,26 @@
+defmodule __WEB_MODULE__.Plugs.LoadOrganization do
+  @moduledoc "Reloads and authorizes URL-scoped organization membership on every request."
+  import Plug.Conn
+
+  def init(options), do: options
+
+  def call(%{path_params: %{"organization_slug" => slug}, assigns: %{current_user: actor}} = conn, _options) do
+    with {:ok, [organization]} <-
+           __MODULE__.Organizations.Organization
+           |> Ash.Query.filter_input(slug: slug)
+           |> Ash.read(actor: actor),
+         {:ok, [membership]} <-
+           __MODULE__.Organizations.Membership
+           |> Ash.Query.filter_input(user_id: actor.id, active: true)
+           |> Ash.read(tenant: organization.id, actor: actor) do
+      conn
+      |> assign(:current_organization, organization)
+      |> assign(:current_membership, membership)
+      |> Ash.PlugHelpers.set_tenant(organization)
+    else
+      _error -> conn |> send_resp(:not_found, "not found") |> halt()
+    end
+  end
+
+  def call(conn, _options), do: conn |> send_resp(:not_found, "not found") |> halt()
+end

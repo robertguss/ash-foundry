@@ -1,0 +1,21 @@
+defmodule __WEB_MODULE__.Plugs.RequestLimits do
+  @moduledoc "Rejects excessive request-target and header metadata before parsing a body."
+  import Plug.Conn
+
+  @max_query_bytes 2_048
+  @max_header_count 64
+  @max_header_bytes 16_384
+
+  def init(options), do: options
+
+  def call(conn, _options) do
+    header_bytes = Enum.reduce(conn.req_headers, 0, fn {name, value}, bytes -> bytes + byte_size(name) + byte_size(value) end)
+
+    if byte_size(conn.query_string) > @max_query_bytes or length(conn.req_headers) > @max_header_count or
+         header_bytes > @max_header_bytes do
+      conn |> send_resp(:request_header_fields_too_large, "request metadata too large") |> halt()
+    else
+      conn
+    end
+  end
+end

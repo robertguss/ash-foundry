@@ -1,0 +1,15 @@
+import { expect, test } from "@playwright/test";
+
+test("serves the real Phoenix and Inertia application shell", async ({ page }) => {
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: /Welcome|Dashboard|Sign in/ }),
+  ).toBeVisible();
+  await expect(page.locator("meta[name=csrf-token]")).toHaveCount(1);
+});
+
+test("liveness does not create a browser session", async ({ request }) => {
+  const response = await request.get("/healthz");
+  expect(response.ok()).toBe(true);
+  expect(response.headers()["set-cookie"]).toBeUndefined();
+});

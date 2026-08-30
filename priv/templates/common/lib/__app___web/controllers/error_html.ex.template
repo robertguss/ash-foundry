@@ -1,0 +1,13 @@
+defmodule __WEB_MODULE__.ErrorHTML do
+  @moduledoc false
+  use __WEB_MODULE__, :html
+
+  def render(template, assigns) do
+    assigns = %{
+      request_id: Map.get(assigns, :request_id, "unavailable"),
+      status: Phoenix.Controller.status_message_from_template(template)
+    }
+
+    ~H"<main><h1>{@status}</h1><p>Request ID: {@request_id}</p></main>"
+  end
+end

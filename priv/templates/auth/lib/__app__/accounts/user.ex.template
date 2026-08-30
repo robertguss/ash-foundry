@@ -1,0 +1,277 @@
+defmodule __MODULE__.Accounts.User do
+  @moduledoc "A revocable human account with separately persisted provider identities."
+
+  use Ash.Resource,
+    otp_app: :__APP__,
+    domain: __MODULE__.Accounts,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [AshAuthentication]
+
+  authentication do
+    subject_name :user
+
+    add_ons do
+      log_out_everywhere do
+        apply_on_password_change? true
+      end
+
+__IF_EMAIL_AUTH__
+      confirmation :confirm_new_user do
+        monitor_fields [:email]
+        confirm_on_create? true
+        confirm_on_update? false
+        require_interaction? true
+        confirmed_at_field :confirmed_at
+        auto_confirm_actions [
+__IF_PASSWORD__
+          :reset_password_with_token,
+__END_PASSWORD__
+__IF_MAGIC_LINK__
+          :sign_in_with_magic_link
+__END_MAGIC_LINK__
+        ]
+        sender __MODULE__.Accounts.User.Senders.SendConfirmationEmail
+      end
+__END_EMAIL_AUTH__
+    end
+
+    tokens do
+      enabled? true
+      token_resource __MODULE__.Accounts.Token
+      signing_secret __MODULE__.Secrets
+      store_all_tokens? true
+      require_token_presence_for_authentication? true
+      token_lifetime {__SESSION_ABSOLUTE_MINUTES__, :minutes}
+    end
+
+    strategies do
+__IF_PASSWORD__
+      password :password do
+        identity_field :email
+        hash_provider AshAuthentication.Argon2Provider
+
+        resettable do
+          sender __MODULE__.Accounts.User.Senders.SendPasswordResetEmail
+          password_reset_action_name :reset_password_with_token
+          request_password_reset_action_name :request_password_reset_token
+        end
+      end
+__END_PASSWORD__
+__IF_EMAIL_AUTH__
+      remember_me :remember_me
+__END_EMAIL_AUTH__
+__IF_MAGIC_LINK__
+      magic_link do
+        identity_field :email
+        registration_enabled? __REGISTRATION_ENABLED__
+        require_interaction? true
+        sender __MODULE__.Accounts.User.Senders.SendMagicLinkEmail
+      end
+__END_MAGIC_LINK__
+__IF_GOOGLE__
+      google do
+        client_id __MODULE__.Secrets
+        client_secret __MODULE__.Secrets
+        redirect_uri __MODULE__.Secrets
+        authorization_params scope: "openid email profile"
+        code_verifier true
+        identity_resource __MODULE__.Accounts.UserIdentity
+        trust_email_verified? true
+        on_untrusted_email_match :reject
+        registration_enabled? __REGISTRATION_ENABLED__
+        register_action_name :register_with_google
+      end
+__END_GOOGLE__
+    end
+  end
+
+  postgres do
+    table "users"
+    repo __MODULE__.Repo
+  end
+
+  actions do
+    read :read do
+      primary? true
+    end
+
+    read :get_by_subject do
+      get? true
+      argument :subject, :string, allow_nil?: false
+      prepare AshAuthentication.Preparations.FilterBySubject
+      filter expr(status == :active)
+    end
+
+    read :get_by_email do
+      get_by :email
+    end
+
+__IF_PASSWORD__
+    update :change_password do
+      require_atomic? false
+      accept []
+      argument :current_password, :string, sensitive?: true, allow_nil?: false
+      argument :password, :string, sensitive?: true, allow_nil?: false, constraints: [min_length: 12]
+      argument :password_confirmation, :string, sensitive?: true, allow_nil?: false
+      validate confirm(:password, :password_confirmation)
+
+      validate {AshAuthentication.Strategy.Password.PasswordValidation,
+                strategy_name: :password, password_argument: :current_password}
+
+      change {AshAuthentication.Strategy.Password.HashPasswordChange, strategy_name: :password}
+    end
+
+    read :sign_in_with_password do
+      get? true
+      argument :email, :ci_string, allow_nil?: false
+      argument :password, :string, allow_nil?: false, sensitive?: true
+      prepare AshAuthentication.Strategy.Password.SignInPreparation
+      metadata :token, :string, allow_nil?: false
+    end
+
+    read :sign_in_with_token do
+      get? true
+      argument :token, :string, allow_nil?: false, sensitive?: true
+      prepare AshAuthentication.Strategy.Password.SignInWithTokenPreparation
+      metadata :token, :string, allow_nil?: false
+    end
+
+    create :register_with_password do
+      transaction? true
+      argument :email, :ci_string, allow_nil?: false
+      argument :password, :string, allow_nil?: false, sensitive?: true, constraints: [min_length: 12]
+      argument :password_confirmation, :string, allow_nil?: false, sensitive?: true
+      change __MODULE__.Accounts.Changes.RegistrationGuard
+      change set_attribute(:email, arg(:email))
+      change AshAuthentication.Strategy.Password.HashPasswordChange
+      change AshAuthentication.GenerateTokenChange
+      validate AshAuthentication.Strategy.Password.PasswordConfirmationValidation
+      metadata :token, :string, allow_nil?: false
+    end
+
+    action :request_password_reset_token do
+      argument :email, :ci_string, allow_nil?: false
+      run {AshAuthentication.Strategy.Password.RequestPasswordReset, action: :get_by_email}
+    end
+
+    update :reset_password_with_token do
+      argument :reset_token, :string, allow_nil?: false, sensitive?: true
+      argument :password, :string, allow_nil?: false, sensitive?: true, constraints: [min_length: 12]
+      argument :password_confirmation, :string, allow_nil?: false, sensitive?: true
+      validate AshAuthentication.Strategy.Password.ResetTokenValidation
+      validate AshAuthentication.Strategy.Password.PasswordConfirmationValidation
+      change AshAuthentication.Strategy.Password.HashPasswordChange
+      change AshAuthentication.GenerateTokenChange
+    end
+__END_PASSWORD__
+__IF_MAGIC_LINK__
+__IF_REGISTRATION_ENABLED__
+    create :sign_in_with_magic_link do
+      transaction? true
+      argument :token, :string, allow_nil?: false, sensitive?: true
+      argument :remember_me, :boolean
+      upsert? true
+      upsert_identity :unique_email
+      upsert_fields [:email]
+      change AshAuthentication.Strategy.MagicLink.SignInChange
+      change {AshAuthentication.Strategy.RememberMe.MaybeGenerateTokenChange, strategy_name: :remember_me}
+      change __MODULE__.Accounts.Changes.RegistrationGuard
+      metadata :token, :string, allow_nil?: false
+    end
+__END_REGISTRATION_ENABLED__
+__IF_CLOSED_REGISTRATION__
+    read :sign_in_with_magic_link do
+      argument :token, :string, allow_nil?: false, sensitive?: true
+      prepare AshAuthentication.Strategy.MagicLink.SignInPreparation
+      metadata :token, :string, allow_nil?: false
+    end
+__END_CLOSED_REGISTRATION__
+
+    action :request_magic_link do
+      argument :email, :ci_string, allow_nil?: false
+      run AshAuthentication.Strategy.MagicLink.Request
+    end
+__END_MAGIC_LINK__
+__IF_GOOGLE__
+    create :register_with_google do
+      transaction? true
+      argument :user_info, :map, allow_nil?: false, sensitive?: true
+      argument :oauth_tokens, :map, allow_nil?: false, sensitive?: true
+      upsert? true
+      upsert_identity :unique_email
+      upsert_fields []
+      change AshAuthentication.Strategy.OAuth2.IdentityChange
+
+      change fn changeset, _context ->
+        user_info = Ash.Changeset.get_argument(changeset, :user_info)
+        Ash.Changeset.change_attribute(changeset, :email, user_info["email"])
+      end
+
+      change __MODULE__.Accounts.Changes.RegistrationGuard
+      change set_attribute(:confirmed_at, &DateTime.utc_now/0)
+      change AshAuthentication.GenerateTokenChange
+      metadata :token, :string, allow_nil?: false
+    end
+__END_GOOGLE__
+
+    update :set_system_admin do
+      accept []
+      change set_attribute(:system_admin, true)
+    end
+
+    update :disable do
+      require_atomic? false
+      accept []
+      change set_attribute(:status, :disabled)
+      change set_attribute(:disabled_at, &DateTime.utc_now/0)
+    end
+  end
+
+  policies do
+    bypass AshAuthentication.Checks.AshAuthenticationInteraction do
+      authorize_if always()
+    end
+
+    policy action_type(:read) do
+      forbid_unless actor_present()
+      authorize_if expr(id == ^actor(:id))
+      authorize_if actor_attribute_equals(:system_admin, true)
+    end
+
+    policy action(:change_password) do
+      forbid_unless actor_present()
+      authorize_if expr(id == ^actor(:id))
+    end
+
+    policy action([:set_system_admin, :disable]) do
+      forbid_unless actor_present()
+      authorize_if actor_attribute_equals(:system_admin, true)
+    end
+  end
+
+  attributes do
+    uuid_v7_primary_key :id
+    attribute :email, :ci_string, allow_nil?: false, public?: true
+    attribute :hashed_password, :string, sensitive?: true
+    attribute :confirmed_at, :utc_datetime_usec, public?: true
+    attribute :status, :atom, allow_nil?: false, default: :active, public?: true, constraints: [one_of: [:active, :disabled]]
+    attribute :role, :atom, allow_nil?: false, default: :member, public?: true, constraints: [one_of: [:admin, :member]]
+    attribute :system_admin, :boolean, allow_nil?: false, default: false, public?: true
+    attribute :disabled_at, :utc_datetime_usec
+    timestamps()
+  end
+
+  relationships do
+__IF_GOOGLE__
+    has_many :identities, __MODULE__.Accounts.UserIdentity
+__END_GOOGLE__
+__IF_TENANCY__
+    has_many :memberships, __MODULE__.Organizations.Membership
+__END_TENANCY__
+  end
+
+  identities do
+    identity :unique_email, [:email]
+  end
+end

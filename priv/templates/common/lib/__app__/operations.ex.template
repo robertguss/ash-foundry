@@ -1,0 +1,12 @@
+defmodule __MODULE__.Operations do
+  @moduledoc "Append-oriented audit evidence and durable operational facts."
+  use Ash.Domain, otp_app: :__APP__
+
+  resources do
+    resource __MODULE__.Operations.AuditEvent do
+      define :audit_events, action: :read
+    end
+
+    resource __MODULE__.Operations.JobExecution
+  end
+end

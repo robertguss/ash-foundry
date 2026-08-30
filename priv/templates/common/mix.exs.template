@@ -1,0 +1,99 @@
+defmodule __MODULE__.MixProject do
+  use Mix.Project
+
+  def project do
+    [
+      app: :__APP__,
+      version: "0.1.0",
+      elixir: "== 1.20.4",
+      elixirc_paths: elixirc_paths(Mix.env()),
+      start_permanent: Mix.env() == :prod,
+      aliases: aliases(),
+      deps: deps(),
+      compilers: [:phoenix_live_view] ++ Mix.compilers(),
+      listeners: [Phoenix.CodeReloader],
+      dialyzer: [
+        plt_add_apps: [:mix, :ex_unit],
+__IF_AUTH__
+        ignore_warnings: "dialyzer.ignore-warnings"
+__END_AUTH__
+      ],
+      consolidate_protocols: Mix.env() != :test
+    ]
+  end
+
+  def application do
+    [
+      mod: {__MODULE__.Application, []},
+      extra_applications: [:logger, :runtime_tools]
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: [
+        credo: :test,
+        dialyzer: :test,
+        "deps.audit": :test,
+        "hex.audit": :test,
+        sobelow: :test
+      ]
+    ]
+  end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_environment), do: ["lib"]
+
+  defp deps do
+    [
+      {:phoenix, "== 1.8.13"},
+      {:phoenix_ecto, "== 4.7.0"},
+      {:phoenix_html, "== 4.3.0"},
+      {:phoenix_live_reload, "== 1.7.0", only: :dev},
+      {:phoenix_live_view, "== 1.2.11"},
+      {:lazy_html, "== 0.1.12", only: :test},
+      {:phoenix_live_dashboard, "== 0.8.7"},
+      {:gettext, "== 1.0.2"},
+      {:jason, "== 1.4.5"},
+      {:dns_cluster, "== 0.2.0"},
+      {:bandit, "== 1.12.5"},
+      {:telemetry_metrics, "== 1.2.0"},
+      {:telemetry_poller, "== 1.3.0"},
+      {:igniter, "== 0.8.3", only: [:dev, :test]},
+      {:ash, "== 3.32.1"},
+      {:ash_postgres, "== 2.12.0"},
+      {:ash_phoenix, "== 2.3.24"},
+      {:picosat_elixir, "== 0.2.3"},
+__IF_AUTH__
+      {:ash_authentication, "== 4.14.2"},
+      {:ash_authentication_phoenix, "== 2.17.3"},
+      {:argon2_elixir, "== 4.1.3"},
+__END_AUTH__
+      {:oban, "== 2.24.0"},
+      {:inertia, "== 2.6.2"},
+      {:phoenix_vite, "== 0.5.1"},
+      {:swoosh, "== 1.28.0"},
+      {:gen_smtp, "== 1.3.0"},
+      {:req, "== 0.7.4"},
+      {:sentry, "== 13.5.0"},
+      {:hammer, "== 7.4.1"},
+      {:logger_json, "== 7.0.4"},
+      {:telemetry_metrics_prometheus_core, "== 1.2.1"},
+      {:tidewave, "== 0.9.0", only: :dev},
+      {:credo, "== 1.7.19", only: [:dev, :test], runtime: false},
+      {:dialyxir, "== 1.4.7", only: [:dev, :test], runtime: false},
+      {:mix_audit, "== 2.1.5", only: [:dev, :test], runtime: false},
+      {:sobelow, "== 0.15.0", only: [:dev, :test], runtime: false}
+    ]
+  end
+
+  defp aliases do
+    [
+      setup: ["deps.get", "ash.setup", "cmd --cd assets pnpm install"],
+      test: ["ash.setup --quiet", "test"],
+      "assets.build": ["cmd --cd assets pnpm exec vite build"],
+      "assets.deploy": ["assets.build", "phx.digest"],
+      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
+    ]
+  end
+end

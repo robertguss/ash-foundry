@@ -1,0 +1,21 @@
+import { MantineProvider } from "@mantine/core";
+import { render, screen } from "@testing-library/react";
+import { axe } from "vitest-axe";
+import { expect, test } from "vitest";
+
+import Settings from "./Settings";
+
+test("renders an accessible empty security activity state", async () => {
+  const { container } = render(
+__IF_TENANCY__
+    <MantineProvider><Settings activity={[]} canCreateOrganization={false} csrfToken="csrf" methods={["password"]} /></MantineProvider>,
+__END_TENANCY__
+__IF_NO_TENANCY__
+    <MantineProvider><Settings activity={[]} csrfToken="csrf" methods={["password"]} /></MantineProvider>,
+__END_NO_TENANCY__
+  );
+
+  expect(screen.getByRole("heading", { name: "Profile and security" })).toBeInTheDocument();
+  expect(screen.getByText("No activity is available yet.")).toBeInTheDocument();
+  expect((await axe(container, { rules: { "color-contrast": { enabled: false } } })).violations).toEqual([]);
+});

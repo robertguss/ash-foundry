@@ -1,0 +1,53 @@
+defmodule __WEB_MODULE__.Telemetry do
+  @moduledoc "Bounded-cardinality Phoenix, Ecto, VM, and Oban metrics."
+  use Supervisor
+  import Telemetry.Metrics
+
+  @spec start_link(term()) :: Supervisor.on_start()
+  def start_link(arg),
+    do: Supervisor.start_link(__WEB_MODULE__.Telemetry, arg, name: __WEB_MODULE__.Telemetry)
+
+  @impl true
+  def init(_arg) do
+    children = [{:telemetry_poller, measurements: periodic_measurements(), period: 10_000}]
+    Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  @spec metrics() :: [Telemetry.Metrics.t()]
+  def metrics do
+    [
+      counter("phoenix.endpoint.stop.count"),
+      distribution("phoenix.endpoint.stop.duration.seconds",
+        event_name: [:phoenix, :endpoint, :stop],
+        measurement: :duration,
+        unit: {:native, :second},
+        reporter_options: [buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5]]
+      ),
+      distribution("__APP__.repo.query.total_time.seconds",
+        event_name: [:__APP__, :repo, :query],
+        measurement: :total_time,
+        unit: {:native, :second},
+        reporter_options: [buckets: [0.001, 0.005, 0.01, 0.025, 0.1, 0.5, 1]]
+      ),
+      counter("oban.job.stop.count", tags: [:queue, :state]),
+      distribution("oban.job.stop.duration.seconds",
+        tags: [:queue],
+        unit: {:native, :second},
+        reporter_options: [buckets: [0.01, 0.1, 0.5, 1, 5, 30, 120]]
+      ),
+      last_value("vm.memory.total.bytes", event_name: [:vm, :memory], measurement: :total, unit: :byte),
+      last_value("vm.total_run_queue_lengths.total")
+    ]
+  end
+
+  defp periodic_measurements, do: [{__WEB_MODULE__.Telemetry, :dispatch_vm_metrics, []}]
+
+  @doc false
+  def dispatch_vm_metrics do
+    memory = :erlang.memory()
+    :telemetry.execute([:vm, :memory], %{total: memory[:total]}, %{})
+
+    run_queue = :erlang.statistics(:run_queue)
+    :telemetry.execute([:vm, :total_run_queue_lengths], %{total: run_queue}, %{})
+  end
+end

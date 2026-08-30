@@ -1,0 +1,91 @@
+defmodule __WEB_MODULE__.SettingsController do
+  use __WEB_MODULE__, :controller
+  require Ash.Query
+
+  def index(conn, _params) do
+    actor = conn.assigns.current_user
+
+    query =
+      __MODULE__.Operations.AuditEvent
+      |> Ash.Query.for_read(:read)
+      |> Ash.Query.filter(actor_id == ^actor.id)
+      |> Ash.Query.sort(occurred_at: :desc)
+      |> Ash.Query.limit(25)
+
+    activity =
+      case Ash.read(query, actor: actor) do
+        {:ok, events} -> Enum.map(events, &present_event/1)
+        {:error, _error} -> []
+      end
+
+    props =
+      __WEB_MODULE__.DashboardPresenter.shared(conn)
+      |> Map.merge(%{
+        activity: activity,
+        can_create_organization: can_create_organization?(actor),
+        csrf_token: get_csrf_token(),
+        methods: [
+__IF_GOOGLE__
+          "google",
+__END_GOOGLE__
+__IF_PASSWORD__
+          "password",
+__END_PASSWORD__
+__IF_MAGIC_LINK__
+          "magic_link",
+__END_MAGIC_LINK__
+        ]
+      })
+
+    render_inertia(conn, "Settings", props)
+  end
+
+__IF_PASSWORD__
+  def change_password(conn, %{"security" => attributes}) do
+    actor = conn.assigns.current_user
+
+    input = %{
+      current_password: attributes["current_password"],
+      password: attributes["password"],
+      password_confirmation: attributes["password_confirmation"]
+    }
+
+    case actor
+         |> Ash.Changeset.for_update(:change_password, input, actor: actor)
+         |> Ash.update(actor: actor) do
+      {:ok, _user} ->
+        conn
+        |> configure_session(drop: true)
+        |> put_flash(:info, "Password changed. Sign in again on this device")
+        |> redirect(to: "/sign-in")
+
+      {:error, _error} ->
+        conn
+        |> put_flash(:error, "Password could not be changed")
+        |> redirect(to: "/settings")
+    end
+  end
+__END_PASSWORD__
+
+__IF_TENANCY__
+__IF_SAAS__
+  defp can_create_organization?(_actor), do: true
+__END_SAAS__
+__IF_NOT_SAAS__
+  defp can_create_organization?(actor), do: actor.system_admin
+__END_NOT_SAAS__
+__END_TENANCY__
+__IF_NO_TENANCY__
+  defp can_create_organization?(_actor), do: false
+__END_NO_TENANCY__
+
+  defp present_event(event) do
+    %{
+      id: event.id,
+      action: event.action,
+      outcome: event.outcome,
+      reason_code: event.reason_code,
+      occurred_at: event.occurred_at
+    }
+  end
+end

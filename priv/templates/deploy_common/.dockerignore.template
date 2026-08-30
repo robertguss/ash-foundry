@@ -1,0 +1,10 @@
+/_build/
+/assets/node_modules/
+/cover/
+/deps/
+/doc/
+/.git/
+/.env
+/.env.*
+!/.env.example
+/test/

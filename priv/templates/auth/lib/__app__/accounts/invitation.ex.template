@@ -1,0 +1,69 @@
+defmodule __MODULE__.Accounts.Invitation do
+  @moduledoc "A single-use, email-bound invitation whose bearer token is stored only as a digest."
+
+  use Ash.Resource,
+    otp_app: :__APP__,
+    domain: __MODULE__.Accounts,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer]
+
+  postgres do
+    table "invitations"
+    repo __MODULE__.Repo
+  end
+
+  actions do
+    read :read, primary?: true
+    create :issue, accept: [:email, :kind, :role, :organization_id, :token_digest, :expires_at, :created_by_id]
+
+    update :revoke do
+      accept []
+      change set_attribute(:revoked_at, &DateTime.utc_now/0)
+    end
+  end
+
+  policies do
+    bypass actor_attribute_equals(:system_admin, true) do
+      authorize_if always()
+    end
+
+    policy action_type([:read, :create, :update]) do
+      forbid_unless actor_present()
+__IF_NO_TENANCY__
+      authorize_if actor_attribute_equals(:role, :admin)
+__END_NO_TENANCY__
+__IF_TENANCY__
+      authorize_if expr(exists(organization.memberships, user_id == ^actor(:id) and role in [:owner, :admin] and active == true))
+__END_TENANCY__
+    end
+  end
+
+  attributes do
+    uuid_v7_primary_key :id
+    attribute :email, :ci_string, allow_nil?: false, public?: true
+    attribute :kind, :atom, allow_nil?: false, public?: true, constraints: [one_of: [:system_admin, :membership]]
+    attribute :role, :atom, allow_nil?: false, public?: true, constraints: [one_of: [:owner, :admin, :member]]
+    attribute :organization_id, :uuid, public?: true
+    attribute :token_digest, :binary, allow_nil?: false, sensitive?: true
+    attribute :expires_at, :utc_datetime_usec, allow_nil?: false, public?: true
+    attribute :created_by_id, :uuid
+    attribute :consumed_by_id, :uuid
+    attribute :consumed_at, :utc_datetime_usec, public?: true
+    attribute :revoked_at, :utc_datetime_usec, public?: true
+    create_timestamp :inserted_at
+  end
+
+  identities do
+    identity :unique_token_digest, [:token_digest]
+  end
+
+__IF_TENANCY__
+  relationships do
+    belongs_to :organization, __MODULE__.Organizations.Organization do
+      define_attribute? false
+      source_attribute :organization_id
+      allow_nil? true
+    end
+  end
+__END_TENANCY__
+end

@@ -1,0 +1,25 @@
+defmodule __WEB_MODULE__.DashboardPresenterTest do
+  use ExUnit.Case, async: true
+
+  alias __WEB_MODULE__.DashboardPresenter
+
+  test "shared props are allowlisted and redact authentication state" do
+    actor = %{
+      id: Ash.UUIDv7.generate(),
+      email: "person@example.com",
+      role: :member,
+      system_admin: false,
+      hashed_password: "must-not-leak",
+      identities: [%{access_token: "must-not-leak"}]
+    }
+
+    props =
+      Plug.Test.conn(:get, "/")
+      |> Plug.Conn.assign(:current_user, actor)
+      |> DashboardPresenter.shared()
+
+    assert props.current_user == %{id: actor.id, email: actor.email, role: :member}
+    refute inspect(props) =~ "must-not-leak"
+    refute Map.has_key?(props.current_user, :hashed_password)
+  end
+end

@@ -1,0 +1,20 @@
+import react from "@vitejs/plugin-react";
+import { resolve } from "node:path";
+import { defineConfig } from "vite";
+import { phoenixVitePlugin } from "phoenix_vite";
+
+export default defineConfig({
+  build: {
+    emptyOutDir: true,
+    manifest: true,
+    outDir: "../priv/static",
+    rollupOptions: { input: ["js/app.tsx", "css/app.css"] },
+  },
+  plugins: [react(), phoenixVitePlugin({ pattern: /\.(ex|heex)$/ })],
+  resolve: { alias: { "@": resolve(import.meta.dirname, "js") } },
+  server: {
+    cors: { origin: "http://localhost:4000" },
+    port: 5173,
+    strictPort: true,
+  },
+});

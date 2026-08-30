@@ -1,0 +1,27 @@
+defmodule __WEB_MODULE__.Plugs.BrowserSecurity do
+  @moduledoc "Applies the generated CSP and blocks cross-site unsafe browser requests."
+  import Plug.Conn
+
+  @unsafe_methods ~w(POST PUT PATCH DELETE)
+
+  def init(options), do: options
+
+  def call(conn, _options) do
+    case allow_fetch?(conn) do
+      :ok -> Enum.reduce(headers(), conn, fn {header, value}, acc -> put_resp_header(acc, header, value) end)
+      :error -> conn |> send_resp(:forbidden, "cross-site request rejected") |> halt()
+    end
+  end
+
+  defp allow_fetch?(%{method: method} = conn) when method in @unsafe_methods do
+    case get_req_header(conn, "sec-fetch-site") do
+      [site] when site in ["same-origin", "same-site", "none"] -> :ok
+      [] -> :ok
+      _other -> :error
+    end
+  end
+
+  defp allow_fetch?(_conn), do: :ok
+
+  defp headers, do: Application.fetch_env!(:__APP__, :secure_browser_headers)
+end

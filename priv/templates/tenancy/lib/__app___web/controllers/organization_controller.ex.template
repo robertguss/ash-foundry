@@ -1,0 +1,19 @@
+defmodule __WEB_MODULE__.OrganizationController do
+  use __WEB_MODULE__, :controller
+
+  def create(conn, %{"organization" => attributes}) do
+    input = %{name: attributes["name"], slug: attributes["slug"]}
+
+    case __MODULE__.Organizations.create_organization(conn.assigns.current_user, input) do
+      {:ok, organization} ->
+        conn
+        |> put_flash(:info, "Organization created")
+        |> redirect(to: "/organizations/#{organization.slug}")
+
+      {:error, _error} ->
+        conn
+        |> put_flash(:error, "Organization could not be created")
+        |> redirect(to: "/settings")
+    end
+  end
+end

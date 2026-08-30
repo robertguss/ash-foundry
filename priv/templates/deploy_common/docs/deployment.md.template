@@ -1,0 +1,34 @@
+# Deployment foundation
+
+The generated image runs Phoenix and open-source Oban together as one release,
+as required for v1. Database migrations are an explicit release command and are
+never run independently by every web boot.
+
+## Required runtime configuration
+
+- `DATABASE_URL`, `PHX_HOST`, `SECRET_KEY_BASE`, and `METRICS_TOKEN`
+__IF_AUTH__
+- `TOKEN_SIGNING_SECRET`
+__END_AUTH__
+__IF_GOOGLE__
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI`
+__IF_HOSTED_DOMAIN__
+- `GOOGLE_HOSTED_DOMAIN`
+__END_HOSTED_DOMAIN__
+__END_GOOGLE__
+- Optional email: `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, and `EMAIL_FROM`
+- Optional error reporting: `SENTRY_DSN`
+
+Generate independent random values for every secret. The release refuses blank,
+placeholder, or clearly weak required values. Keep `/metrics` behind provider
+network controls as well as its constant-time bearer-token check.
+
+The liveness probe is `/healthz`; the database-and-migration readiness probe is
+`/readyz`. Provider availability and queue delay intentionally do not eject an
+otherwise healthy web process.
+
+External Google, Resend, Sentry, Render, and Fly behavior must be checked in a
+credentialed staging environment. Local checks validate configuration,
+signatures, release startup, migrations, manifests, and fail-closed behavior;
+they cannot prove provider acceptance, inbox delivery, OAuth consent, or a real
+platform rollout.

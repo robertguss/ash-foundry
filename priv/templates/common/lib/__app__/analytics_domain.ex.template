@@ -1,0 +1,8 @@
+defmodule __MODULE__.AnalyticsDomain do
+  @moduledoc "Canonical aggregate analytics facts."
+  use Ash.Domain, otp_app: :__APP__
+
+  resources do
+    resource __MODULE__.Analytics.MeaningfulAction
+  end
+end

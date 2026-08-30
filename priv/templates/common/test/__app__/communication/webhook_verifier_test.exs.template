@@ -1,0 +1,27 @@
+defmodule __MODULE__.Communication.WebhookVerifierTest do
+  use ExUnit.Case, async: true
+
+  alias __MODULE__.Communication.WebhookVerifier
+
+  test "accepts a current valid signature and rejects tampering" do
+    body = ~s({"type":"email.delivered"})
+    event_id = "evt_test"
+    timestamp = System.system_time(:second) |> Integer.to_string()
+    raw_secret = :crypto.strong_rand_bytes(32)
+    secret = "whsec_" <> Base.encode64(raw_secret)
+    signature = :crypto.mac(:hmac, :sha256, raw_secret, event_id <> "." <> timestamp <> "." <> body)
+    signatures = "v1," <> Base.encode64(signature)
+
+    assert :ok = WebhookVerifier.verify(body, event_id, timestamp, signatures, secret)
+    assert {:error, :invalid_signature} =
+             WebhookVerifier.verify(body <> " ", event_id, timestamp, signatures, secret)
+  end
+
+  test "rejects signatures outside the replay window" do
+    timestamp = System.system_time(:second) - 301 |> Integer.to_string()
+    secret = "whsec_" <> Base.encode64(:crypto.strong_rand_bytes(32))
+
+    assert {:error, :invalid_signature} =
+             WebhookVerifier.verify("{}", "evt_old", timestamp, "v1,invalid", secret)
+  end
+end

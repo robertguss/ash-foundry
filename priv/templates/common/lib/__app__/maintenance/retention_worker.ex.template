@@ -1,0 +1,29 @@
+defmodule __MODULE__.Maintenance.RetentionWorker do
+  @moduledoc "Narrow retention boundary for audit (365 days) and email evidence (90 days)."
+  use Oban.Worker, queue: :maintenance, max_attempts: 5, unique: [period: 86_400]
+
+  @impl Oban.Worker
+  def perform(_job) do
+    __MODULE__.Repo.transaction(fn ->
+      %{num_rows: audit_count} =
+        __MODULE__.Repo.query!("DELETE FROM audit_events WHERE occurred_at < now() - interval '365 days'")
+
+      __MODULE__.Repo.query!("DELETE FROM email_delivery_events WHERE occurred_at < now() - interval '90 days'")
+      __MODULE__.Repo.query!("DELETE FROM webhook_receipts WHERE inserted_at < now() - interval '90 days'")
+      __MODULE__.Repo.query!("DELETE FROM email_deliveries WHERE updated_at < now() - interval '90 days' AND status != 'queued'")
+
+      attributes = %{
+        action: "audit.retention_completed",
+        outcome: :success,
+        target_type: "audit_event",
+        metadata: %{deleted_count: audit_count}
+      }
+
+      __MODULE__.Operations.AuditEvent
+      |> Ash.Changeset.for_create(:record, attributes)
+      |> Ash.create!(authorize?: false)
+    end)
+
+    :ok
+  end
+end

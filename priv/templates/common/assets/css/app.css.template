@@ -1,0 +1,14 @@
+:root {
+  color-scheme: light dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+html { min-width: 20rem; }
+body { margin: 0; }
+
+:focus-visible {
+  outline: 3px solid light-dark(#4c4ad5, #aaa8ff);
+  outline-offset: 3px;
+}

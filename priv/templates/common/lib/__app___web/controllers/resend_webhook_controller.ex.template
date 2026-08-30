@@ -1,0 +1,85 @@
+defmodule __WEB_MODULE__.ResendWebhookController do
+  use __WEB_MODULE__, :controller
+
+  alias __MODULE__.Communication.{DeliveryEvent, EmailDelivery, WebhookReceipt, WebhookVerifier}
+  alias __MODULE__.Repo
+
+  @event_states %{
+    "email.delivered" => :delivered,
+    "email.bounced" => :bounced,
+    "email.complained" => :complained
+  }
+
+  def create(conn, params) do
+    secret = Application.get_env(:__APP__, :resend_webhook_secret, "")
+
+    with [event_id] <- get_req_header(conn, "svix-id"),
+         [timestamp] <- get_req_header(conn, "svix-timestamp"),
+         [signature] <- get_req_header(conn, "svix-signature"),
+         raw_body when is_binary(raw_body) <- conn.assigns[:raw_body],
+         :ok <- WebhookVerifier.verify(raw_body, event_id, timestamp, signature, secret),
+         {:ok, state} <- event_state(params["type"]),
+         provider_message_id when is_binary(provider_message_id) <- get_in(params, ["data", "email_id"]),
+         :ok <- record_event(event_id, provider_message_id, state, params["created_at"]) do
+      send_resp(conn, :no_content, "")
+    else
+      {:error, :duplicate} -> send_resp(conn, :no_content, "")
+      _error -> send_resp(conn, :bad_request, "invalid webhook")
+    end
+  end
+
+  defp event_state(type), do: Map.fetch(@event_states, type)
+
+  defp record_event(event_id, provider_message_id, state, occurred_at) do
+    Repo.transaction(fn ->
+      receipt =
+        WebhookReceipt
+        |> Ash.Changeset.for_create(:record, %{provider_event_id: event_id})
+        |> Ash.create(authorize?: false)
+
+      case receipt do
+        {:ok, _receipt} -> apply_event(provider_message_id, event_id, state, occurred_at)
+        {:error, %Ash.Error.Invalid{}} -> Repo.rollback(:duplicate)
+        {:error, error} -> Repo.rollback(error)
+      end
+    end)
+    |> case do
+      {:ok, :ok} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp apply_event(provider_message_id, event_id, state, occurred_at) do
+    with {:ok, [delivery]} <-
+           EmailDelivery
+           |> Ash.Query.filter_input(provider_message_id: provider_message_id)
+           |> Ash.read(authorize?: false),
+         {:ok, _delivery} <-
+           delivery
+           |> Ash.Changeset.for_update(:apply_event, %{status: state})
+           |> Ash.update(authorize?: false),
+         {:ok, _event} <-
+           DeliveryEvent
+           |> Ash.Changeset.for_create(:record, %{
+             email_delivery_id: delivery.id,
+             provider_event_id: event_id,
+             event_type: state,
+             occurred_at: parse_time(occurred_at)
+           })
+           |> Ash.create(authorize?: false) do
+      :ok
+    else
+      {:ok, []} -> :ok
+      {:error, error} -> Repo.rollback(error)
+    end
+  end
+
+  defp parse_time(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, datetime, _offset} -> datetime
+      _error -> DateTime.utc_now()
+    end
+  end
+
+  defp parse_time(_value), do: DateTime.utc_now()
+end

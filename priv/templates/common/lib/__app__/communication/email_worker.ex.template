@@ -1,0 +1,43 @@
+defmodule __MODULE__.Communication.EmailWorker do
+  @moduledoc "Delivers application-owned email and persists only normalized provider outcomes."
+  use Oban.Worker, queue: :mailers, max_attempts: 10, unique: [period: :infinity, keys: [:delivery_id]]
+
+  alias Swoosh.Email
+
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: %{"delivery_id" => id}}) do
+    with {:ok, delivery} <- Ash.get(__MODULE__.Communication.EmailDelivery, id, authorize?: false),
+         {:ok, metadata} <- delivery |> build_email() |> __MODULE__.Mailer.deliver() do
+      provider_id = provider_id(metadata)
+
+      delivery
+      |> Ash.Changeset.for_update(:accepted, %{provider_message_id: provider_id})
+      |> Ash.update(authorize?: false)
+      |> normalize_result()
+    else
+      {:error, error} -> {:error, classify(error)}
+    end
+  end
+
+  defp build_email(delivery) do
+    Email.new()
+    |> Email.from(Application.fetch_env!(:__APP__, :email_from))
+    |> Email.to(to_string(delivery.to))
+    |> Email.subject(delivery.subject)
+    |> Email.text_body(delivery.text_body)
+    |> Email.html_body(delivery.html_body)
+    |> Email.header("X-Entity-Ref-ID", delivery.opaque_id)
+  end
+
+  defp provider_id(%{id: id}), do: to_string(id)
+  defp provider_id(%{"id" => id}), do: to_string(id)
+  defp provider_id(_metadata), do: nil
+
+  defp normalize_result({:ok, _delivery}), do: :ok
+  defp normalize_result({:error, error}), do: {:error, classify(error)}
+
+  defp classify(%Req.TransportError{reason: reason}), do: "transport_#{reason}"
+  defp classify({:http_error, status, _body}) when status in [408, 409, 425, 429] or status >= 500, do: "provider_transient"
+  defp classify(:email_provider_not_configured), do: "provider_not_configured"
+  defp classify(_error), do: "provider_error"
+end

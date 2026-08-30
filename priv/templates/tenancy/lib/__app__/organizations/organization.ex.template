@@ -1,0 +1,70 @@
+defmodule __MODULE__.Organizations.Organization do
+  @moduledoc "A tenant with an immutable URL slug and mutable display name."
+
+  use Ash.Resource,
+    otp_app: :__APP__,
+    domain: __MODULE__.Organizations,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer]
+
+  postgres do
+    table "organizations"
+    repo __MODULE__.Repo
+  end
+
+  actions do
+    read :read, primary?: true
+    create :create, accept: [:name, :slug]
+    update :rename, accept: [:name]
+  end
+
+  policies do
+    bypass actor_attribute_equals(:system_admin, true) do
+      authorize_if always()
+    end
+
+    policy action_type(:read) do
+      forbid_unless actor_present()
+      authorize_if expr(exists(memberships, user_id == ^actor(:id) and active == true))
+    end
+
+    policy action_type(:create) do
+      forbid_unless actor_present()
+__IF_SAAS__
+      authorize_if always()
+__END_SAAS__
+    end
+
+    policy action_type(:update) do
+      forbid_unless actor_present()
+      authorize_if expr(exists(memberships, user_id == ^actor(:id) and role in [:owner, :admin] and active == true))
+    end
+  end
+
+  attributes do
+    uuid_v7_primary_key :id
+    attribute :name, :string, allow_nil?: false, public?: true, constraints: [min_length: 1, max_length: 120]
+
+    attribute :slug, :string do
+      allow_nil? false
+      public? true
+      writable? true
+      constraints match: ~r/^[a-z0-9]+(?:-[a-z0-9]+)*$/, max_length: 80
+    end
+
+    attribute :active, :boolean, allow_nil?: false, default: true, public?: true
+    timestamps()
+  end
+
+  relationships do
+    has_many :memberships, __MODULE__.Organizations.Membership
+  end
+
+  identities do
+    identity :unique_slug, [:slug]
+  end
+
+  defimpl Ash.ToTenant do
+    def to_tenant(%{id: id}, _resource), do: id
+  end
+end

@@ -1,0 +1,59 @@
+defmodule __MODULE__.Analytics.MeaningfulAction do
+  @moduledoc "A narrow active-user marker; not a page-view or generic event store."
+
+  use Ash.Resource,
+    otp_app: :__APP__,
+    domain: __MODULE__.AnalyticsDomain,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer]
+
+  postgres do
+    table "meaningful_actions"
+    repo __MODULE__.Repo
+  end
+
+  actions do
+    read :read, primary?: true
+    create :record, accept: [:actor_id, :action]
+  end
+
+  policies do
+    bypass actor_attribute_equals(:system_admin, true) do
+      authorize_if always()
+    end
+
+    policy action_type(:read) do
+      forbid_unless actor_present()
+__IF_TENANCY__
+      authorize_if expr(exists(organization.memberships, user_id == ^actor(:id) and role in [:owner, :admin] and active == true))
+__END_TENANCY__
+__IF_NO_TENANCY__
+      authorize_if actor_attribute_equals(:role, :admin)
+__END_NO_TENANCY__
+    end
+  end
+
+__IF_TENANCY__
+  multitenancy do
+    strategy :attribute
+    attribute :organization_id
+  end
+__END_TENANCY__
+
+  attributes do
+    uuid_v7_primary_key :id
+    attribute :actor_id, :uuid, allow_nil?: false
+    attribute :action, :string, allow_nil?: false, constraints: [max_length: 120]
+    create_timestamp :occurred_at
+  end
+
+__IF_TENANCY__
+  relationships do
+    belongs_to :organization, __MODULE__.Organizations.Organization do
+      allow_nil? false
+      public? true
+      attribute_writable? false
+    end
+  end
+__END_TENANCY__
+end

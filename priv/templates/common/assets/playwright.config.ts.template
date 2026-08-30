@@ -1,0 +1,18 @@
+import { defineConfig, devices } from "@playwright/test";
+
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:4002";
+
+export default defineConfig({
+  fullyParallel: true,
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  reporter: "list",
+  retries: 0,
+  testDir: "./tests",
+  use: { baseURL, trace: "retain-on-failure" },
+  webServer: {
+    command: "cd .. && MIX_ENV=test PHX_SERVER=true PORT=4002 mix phx.server",
+    reuseExistingServer: true,
+    timeout: 120_000,
+    url: `${baseURL}/healthz`,
+  },
+});

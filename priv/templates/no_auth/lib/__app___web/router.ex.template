@@ -1,0 +1,51 @@
+defmodule __WEB_MODULE__.Router do
+  use __WEB_MODULE__, :router
+
+  # BrowserSecurity applies the full configured CSP and secure-header set.
+  # sobelow_skip ["Config.Headers"]
+  pipeline :browser do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {__WEB_MODULE__.Layouts, :root}
+    plug :protect_from_forgery
+    plug __WEB_MODULE__.Plugs.BrowserSecurity
+    plug Inertia.Plug
+  end
+
+  pipeline :api do
+    plug :accepts, ["json"]
+  end
+
+  pipeline :metrics do
+    plug :accepts, ["text"]
+    plug __WEB_MODULE__.Plugs.MetricsAuth
+  end
+
+  scope "/", __WEB_MODULE__ do
+    pipe_through :browser
+    get "/", PageController, :index
+  end
+
+  scope "/", __WEB_MODULE__ do
+    pipe_through :api
+    get "/healthz", HealthController, :live
+    get "/readyz", HealthController, :ready
+    post "/webhooks/resend", ResendWebhookController, :create, log: false
+  end
+
+  scope "/", __WEB_MODULE__ do
+    pipe_through :metrics
+    get "/metrics", MetricsController, :index
+  end
+
+  if Application.compile_env(:__APP__, :dev_routes, false) do
+    import Phoenix.LiveDashboard.Router
+
+    scope "/dev" do
+      pipe_through :browser
+      live_dashboard "/dashboard", metrics: __WEB_MODULE__.Telemetry
+      forward "/mailbox", Plug.Swoosh.MailboxPreview
+    end
+  end
+end

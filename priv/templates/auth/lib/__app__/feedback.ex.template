@@ -1,0 +1,8 @@
+defmodule __MODULE__.Feedback do
+  @moduledoc "Authenticated feedback kept distinct from telemetry, analytics, and audit metadata."
+  use Ash.Domain, otp_app: :__APP__
+
+  resources do
+    resource __MODULE__.Feedback.Submission
+  end
+end

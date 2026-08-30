@@ -1,0 +1,35 @@
+defmodule __MODULE__.Organizations.Changes.PreventLastOwner do
+  @moduledoc false
+  use Ash.Resource.Change
+
+  import Ecto.Query
+
+  alias __MODULE__.Organizations.Membership
+  alias __MODULE__.Repo
+
+  @impl true
+  def change(changeset, _options, _context) do
+    Ash.Changeset.before_action(changeset, fn changeset ->
+      record = changeset.data
+      role = Ash.Changeset.get_attribute(changeset, :role)
+      active = Ash.Changeset.get_attribute(changeset, :active)
+
+      if record.role == :owner and record.active and (role != :owner or active == false) and last_owner?(record) do
+        Ash.Changeset.add_error(changeset, field: :role, message: "transfer ownership before changing the final owner")
+      else
+        changeset
+      end
+    end)
+  end
+
+  defp last_owner?(record) do
+    owner_count =
+      Membership
+      |> where([membership], membership.organization_id == ^record.organization_id)
+      |> where([membership], membership.role == :owner and membership.active)
+      |> where([membership], membership.id != ^record.id)
+      |> Repo.aggregate(:count, :id)
+
+    owner_count == 0
+  end
+end

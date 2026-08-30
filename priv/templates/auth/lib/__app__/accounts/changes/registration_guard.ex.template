@@ -1,0 +1,99 @@
+defmodule __MODULE__.Accounts.Changes.RegistrationGuard do
+  @moduledoc "Enforces registration, trusted Google-domain, and invitation policy before persistence."
+  use Ash.Resource.Change
+
+  @invitation_key {__MODULE__, :pending_invitation_id}
+
+  @impl true
+  def change(changeset, _options, _context) do
+    email = registration_email(changeset)
+    new_account? = not existing_account?(email)
+
+    with :ok <- validate_google_claims(changeset),
+         {:ok, invitation_id} <- authorize_registration(new_account?, email) do
+      changeset
+      |> maybe_confirm_invited_email(new_account?, invitation_id)
+      |> maybe_consume_invitation(new_account?, invitation_id)
+    else
+      {:error, message} -> Ash.Changeset.add_error(changeset, field: :email, message: message)
+    end
+  end
+
+  defp authorize_registration(false, _email), do: {:ok, nil}
+
+  defp authorize_registration(true, email) do
+    case Application.fetch_env!(:__APP__, :registration_policy) do
+      :open -> {:ok, nil}
+      :closed -> {:error, "registration is closed"}
+      :invite_only -> validate_pending_invitation(email)
+    end
+  end
+
+  defp validate_pending_invitation(email) do
+    with invitation_id when is_binary(invitation_id) <- Process.get(@invitation_key),
+         %{rows: [[_id]]} <-
+           __MODULE__.Repo.query!(
+             """
+             SELECT id
+             FROM invitations
+             WHERE id = $1::uuid AND email = $2::citext
+               AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+             """,
+             [Ecto.UUID.dump!(invitation_id), email]
+           ) do
+      {:ok, invitation_id}
+    else
+      _other -> {:error, "a valid email-bound invitation is required"}
+    end
+  end
+
+  defp maybe_confirm_invited_email(changeset, true, invitation_id) when is_binary(invitation_id),
+    do: Ash.Changeset.change_attribute(changeset, :confirmed_at, DateTime.utc_now())
+
+  defp maybe_confirm_invited_email(changeset, _new_account?, _invitation_id), do: changeset
+
+  defp maybe_consume_invitation(changeset, true, invitation_id) when is_binary(invitation_id) do
+    Ash.Changeset.after_action(changeset, fn _changeset, user ->
+      __MODULE__.Accounts.complete_invitation(invitation_id, user)
+    end)
+  end
+
+  defp maybe_consume_invitation(changeset, _new_account?, _invitation_id), do: changeset
+
+  defp registration_email(changeset) do
+    user_info = Ash.Changeset.get_argument(changeset, :user_info) || %{}
+
+    (Ash.Changeset.get_argument(changeset, :email) ||
+       user_info["email"] || user_info[:email] || Ash.Changeset.get_attribute(changeset, :email))
+    |> to_string()
+    |> String.trim()
+    |> String.downcase()
+  end
+
+  defp existing_account?(""), do: false
+
+  defp existing_account?(email) do
+    %{rows: [[existing?]]} =
+      __MODULE__.Repo.query!("SELECT EXISTS (SELECT 1 FROM users WHERE email = $1::citext)", [email])
+
+    existing?
+  end
+
+  defp validate_google_claims(changeset) do
+    case Ash.Changeset.get_argument(changeset, :user_info) do
+      nil ->
+        :ok
+
+      user_info ->
+        verified? = user_info["email_verified"] || user_info[:email_verified]
+        hosted_domain = Application.fetch_env!(:__APP__, :google)[:hosted_domain]
+        claim_domain = user_info["hd"] || user_info[:hd]
+
+        cond do
+          verified? != true -> {:error, "Google did not provide a verified email"}
+          is_binary(hosted_domain) and hosted_domain != claim_domain -> {:error, "Google account is outside the required hosted domain"}
+          true -> :ok
+        end
+    end
+  end
+end

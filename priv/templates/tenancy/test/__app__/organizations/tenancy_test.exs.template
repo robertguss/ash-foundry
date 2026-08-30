@@ -1,0 +1,179 @@
+defmodule __MODULE__.Organizations.TenancyTest do
+  use __MODULE__.DataCase, async: true
+
+  alias __MODULE__.Accounts
+  alias __MODULE__.Accounts.User
+  alias __MODULE__.Analytics
+  alias __MODULE__.Analytics.MeaningfulAction
+  alias __MODULE__.Feedback.Submission
+  alias __MODULE__.Organizations
+  alias __MODULE__.Organizations.{Membership, Organization}
+
+  test "policies isolate organizations, memberships, and feedback" do
+    owner = create_user("owner@example.com")
+    outsider = create_user("outsider@example.com")
+
+    assert {:ok, first} = create_organization(owner, %{name: "First", slug: "first"})
+    assert {:ok, second} = create_organization(outsider, %{name: "Second", slug: "second"})
+
+    visible_organization_ids = Organization |> Ash.read!(actor: owner) |> Enum.map(& &1.id)
+
+    assert visible_organization_ids == [first.id]
+    assert {:error, _error} = Ash.read(Organization)
+    assert [] == Ash.read!(Membership, actor: owner, tenant: second)
+
+    assert {:ok, _submission} = result = submit_feedback(owner, first)
+    assert ^result = Analytics.mark_meaningful_action(result, owner, "feedback.submitted")
+    assert [%{action: "feedback.submitted", actor_id: actor_id}] =
+             Ash.read!(MeaningfulAction, actor: owner, tenant: first)
+
+    assert actor_id == owner.id
+    assert {:error, _error} = submit_feedback(owner, second)
+    assert [] == Ash.read!(Submission, actor: outsider, tenant: first)
+    assert [] == Ash.read!(MeaningfulAction, actor: outsider, tenant: first)
+  end
+
+  test "the final active owner cannot be demoted or deactivated" do
+    owner = create_user("owner@example.com")
+    successor = create_user("successor@example.com")
+
+    assert {:ok, organization} =
+             create_organization(owner, %{name: "Protected", slug: "protected"})
+
+    [membership] =
+      Membership
+      |> Ash.Query.filter_input(user_id: owner.id)
+      |> Ash.read!(actor: owner, tenant: organization)
+
+    assert {:error, _error} =
+             membership
+             |> Ash.Changeset.for_update(:change_role, %{role: :member},
+               actor: owner,
+               tenant: organization
+             )
+             |> Ash.update(actor: owner, tenant: organization)
+
+    create_membership(successor, organization, :owner)
+
+    assert {:ok, changed} =
+             membership
+             |> Ash.Changeset.for_update(:change_role, %{role: :member},
+               actor: owner,
+               tenant: organization
+             )
+             |> Ash.update(actor: owner, tenant: organization)
+
+    assert changed.role == :member
+  end
+
+  test "a membership invitation grants only its bounded organization role" do
+    owner = create_user("owner@example.com")
+    invitee = create_user("invitee@example.com")
+
+    assert {:ok, organization} =
+             create_organization(owner, %{name: "Inviting", slug: "inviting"})
+
+    assert {:ok, url} =
+             Accounts.issue_invitation(
+               %{
+                 email: "invitee@example.com",
+                 kind: :membership,
+                 role: :admin,
+                 organization_id: organization.id,
+                 expires_in: 3600
+               },
+               owner
+             )
+
+    %{"id" => invitation_id, "token" => token} =
+      url |> URI.parse() |> Map.fetch!(:fragment) |> URI.decode_query()
+
+    assert {:ok, %{id: ^invitation_id}} = Accounts.verify_invitation(invitation_id, token)
+    assert {:ok, ^invitee} = Accounts.complete_invitation(invitation_id, invitee)
+
+    assert [%{role: :admin, user_id: user_id}] =
+             Membership
+             |> Ash.Query.filter_input(user_id: invitee.id)
+             |> Ash.read!(actor: invitee, tenant: organization)
+
+    assert user_id == invitee.id
+  end
+
+__IF_NOT_SAAS__
+  test "organization creation is restricted to system administrators" do
+    ordinary_user = create_user("ordinary@example.com")
+    system_admin = create_user("system-admin@example.com", true)
+
+    assert {:error, _error} =
+             Organizations.create_organization(ordinary_user, %{
+               name: "Forbidden",
+               slug: "forbidden"
+             })
+
+    assert {:ok, _organization} =
+             Organizations.create_organization(system_admin, %{
+               name: "Allowed",
+               slug: "allowed"
+             })
+  end
+__END_NOT_SAAS__
+
+__IF_SAAS__
+  defp create_organization(owner, attributes),
+    do: Organizations.create_organization(owner, attributes)
+__END_SAAS__
+__IF_NOT_SAAS__
+  defp create_organization(owner, attributes) do
+    system_admin = create_user("system-admin-#{attributes.slug}@example.com", true)
+
+    with {:ok, organization} <- Organizations.create_organization(system_admin, attributes) do
+      create_membership(owner, organization, :owner)
+
+      [admin_membership] =
+        Membership
+        |> Ash.Query.filter_input(user_id: system_admin.id)
+        |> Ash.read!(authorize?: false, tenant: organization)
+
+      admin_membership
+      |> Ash.Changeset.for_update(:change_role, %{role: :member}, tenant: organization)
+      |> Ash.update!(authorize?: false, tenant: organization)
+
+      {:ok, organization}
+    end
+  end
+__END_NOT_SAAS__
+
+  defp create_user(email, system_admin \\ false) do
+    id = Ash.UUIDv7.generate()
+    now = DateTime.utc_now()
+
+    __MODULE__.Repo.query!(
+      """
+      INSERT INTO users (id, email, status, role, system_admin, confirmed_at, inserted_at, updated_at)
+      VALUES ($1, $2::citext, 'active', 'member', $3, $4, $4, $4)
+      """,
+      [Ecto.UUID.dump!(id), email, system_admin, now]
+    )
+
+    Ash.get!(User, id, authorize?: false)
+  end
+
+  defp create_membership(user, organization, role) do
+    Membership
+    |> Ash.Changeset.for_create(:create, %{user_id: user.id, role: role})
+    |> Ash.Changeset.set_tenant(organization)
+    |> Ash.create!(authorize?: false)
+  end
+
+  defp submit_feedback(actor, organization) do
+    Submission
+    |> Ash.Changeset.for_create(:submit, %{
+      category: :idea,
+      description: "Tenant-scoped feedback",
+      route_context: "/organizations/#{organization.slug}",
+      reporter_id: actor.id
+    })
+    |> Ash.Changeset.set_tenant(organization)
+    |> Ash.create(actor: actor)
+  end
+end

@@ -1,0 +1,50 @@
+defmodule __MODULE__.Release do
+  @moduledoc "Release-safe database tasks and one-time operator commands."
+  @app :__APP__
+
+  @spec migrate() :: :ok
+  def migrate do
+    load_app()
+
+    Enum.each(repos(), fn repo ->
+      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
+    end)
+  end
+
+  @spec rollback(module(), non_neg_integer()) :: :ok
+  def rollback(repo, version) do
+    load_app()
+    {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :down, to: version))
+    :ok
+  end
+
+__IF_AUTH__
+  @doc "Creates one 30-minute, email-bound system-administrator invitation."
+  @spec invite_system_admin(String.t()) :: :ok
+  def invite_system_admin(email) do
+    load_app()
+
+    {:ok, result, _apps} =
+      Ecto.Migrator.with_repo(__MODULE__.Repo, fn _repo ->
+        __MODULE__.Accounts.create_system_admin_invitation(email)
+      end)
+
+    case result do
+      {:ok, url} ->
+        IO.puts("WARNING: this 30-minute bearer URL is displayed once; deliver it privately.")
+        IO.puts(url)
+        :ok
+
+      {:error, reason} ->
+        raise "system-administrator invitation failed: #{inspect(reason)}"
+    end
+  end
+__END_AUTH__
+
+  defp repos, do: Application.fetch_env!(@app, :ecto_repos)
+
+  defp load_app do
+    Application.ensure_all_started(:ssl)
+    Application.ensure_loaded(@app)
+  end
+end

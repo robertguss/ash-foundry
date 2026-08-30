@@ -1,0 +1,2 @@
+# Add idempotent application seed data here. Development personas are created
+# on demand through development-only routes and are never seeded in production.

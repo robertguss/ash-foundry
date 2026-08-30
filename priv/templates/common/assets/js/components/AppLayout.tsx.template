@@ -1,0 +1,85 @@
+import { Link, usePage } from "@inertiajs/react";
+__IF_AUTH__
+import { Alert, AppShell, Burger, Button, Group, Menu, Stack, Text } from "@mantine/core";
+__END_AUTH__
+__IF_NO_AUTH__
+import { Alert, AppShell, Burger, Group, Stack } from "@mantine/core";
+__END_NO_AUTH__
+import { useDisclosure } from "@mantine/hooks";
+import type { PropsWithChildren } from "react";
+
+import type { SharedProps } from "@/types";
+import classes from "./AppLayout.module.css";
+
+export function AppLayout({ children }: PropsWithChildren) {
+  const [opened, { toggle }] = useDisclosure();
+__IF_AUTH__
+  const { currentOrganization, currentUser, flash, organizations } = usePage<SharedProps>().props;
+  const feedbackHref = currentOrganization ? `/organizations/${currentOrganization.slug}/feedback` : "/feedback";
+  const adminHref = currentOrganization && currentOrganization.role !== "member"
+    ? `/organizations/${currentOrganization.slug}/admin`
+    : currentUser && currentUser.role !== "member"
+      ? "/admin"
+      : null;
+__END_AUTH__
+__IF_NO_AUTH__
+  const { flash } = usePage<SharedProps>().props;
+__END_NO_AUTH__
+
+  return (
+    <AppShell
+      className={classes.shell}
+      header={{ height: 64 }}
+      navbar={{ width: 260, breakpoint: "sm", collapsed: { desktop: true, mobile: !opened } }}
+    >
+      <AppShell.Header className={classes.header} px="md">
+        <Group h="100%" justify="space-between">
+          <Group>
+            <Burger aria-label="Toggle navigation" hiddenFrom="sm" opened={opened} onClick={toggle} size="sm" />
+            <Link className={classes.brand} href="/">__MODULE__</Link>
+            <Group gap="lg" visibleFrom="sm">
+              <Link className={classes.navLink} href="/">Dashboard</Link>
+__IF_AUTH__
+              {currentUser ? <Link className={classes.navLink} href={feedbackHref}>Feedback</Link> : null}
+              {currentUser ? <Link className={classes.navLink} href="/settings">Profile &amp; security</Link> : null}
+              {adminHref ? <Link className={classes.navLink} href={adminHref}>Administration</Link> : null}
+__END_AUTH__
+            </Group>
+          </Group>
+__IF_AUTH__
+          <Group>
+            {organizations.length > 0 ? (
+              <Menu>
+                <Menu.Target><Button variant="subtle">{currentOrganization?.name ?? "Choose organization"}</Button></Menu.Target>
+                <Menu.Dropdown>
+                  {organizations.map((organization) => (
+                    <Menu.Item component={Link} href={`/organizations/${organization.slug}`} key={organization.id}>
+                      {organization.name}
+                    </Menu.Item>
+                  ))}
+                </Menu.Dropdown>
+              </Menu>
+            ) : null}
+            {currentUser ? <Text size="sm">{currentUser.email}</Text> : <Button component={Link} href="/sign-in">Sign in</Button>}
+          </Group>
+__END_AUTH__
+        </Group>
+      </AppShell.Header>
+      <AppShell.Navbar p="md">
+        <Link className={classes.navLink} href="/">Dashboard</Link>
+__IF_AUTH__
+        {currentUser ? <Link className={classes.navLink} href={feedbackHref}>Feedback</Link> : null}
+        {currentUser ? <Link className={classes.navLink} href="/settings">Profile &amp; security</Link> : null}
+        {adminHref ? <Link className={classes.navLink} href={adminHref}>Administration</Link> : null}
+__END_AUTH__
+      </AppShell.Navbar>
+      <AppShell.Main>
+        <Stack className={classes.main}>
+          {flash?.info ? <Alert color="green">{flash.info}</Alert> : null}
+          {flash?.error ? <Alert color="red">{flash.error}</Alert> : null}
+          {children}
+        </Stack>
+      </AppShell.Main>
+    </AppShell>
+  );
+}

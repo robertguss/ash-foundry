@@ -1,0 +1,120 @@
+import { Head } from "@inertiajs/react";
+import { Badge, Button, Card, NativeSelect, SimpleGrid, Stack, Table, Text, TextInput, Title } from "@mantine/core";
+__IF_TENANCY__
+import { Group } from "@mantine/core";
+__END_TENANCY__
+
+import { AppLayout } from "@/components/AppLayout";
+
+type AuditEvent = { id: string; action: string; outcome: string; occurredAt: string };
+type Invitation = { id: string; email: string; kind: string; role: string; expiresAt: string; consumedAt: string | null; revokedAt: string | null };
+type Membership = { id: string; email: string; role: "owner" | "admin" | "member"; active: boolean };
+
+type AdministrationProps = {
+  analytics: Array<{ label: string; value: number | string }>;
+  auditEvents: AuditEvent[];
+  csrfToken: string;
+  invitations: Invitation[];
+  memberships: Membership[];
+};
+
+export default function Administration({ analytics, auditEvents, csrfToken, invitations, memberships }: AdministrationProps) {
+  const action = window.location.pathname.endsWith("/admin")
+    ? `${window.location.pathname}/invitations`
+    : "/admin/invitations";
+
+  return (
+    <AppLayout>
+      <Head title="Administration" />
+      <Stack gap="xl">
+        <div>
+          <Title order={1}>Administration</Title>
+          <Text c="dimmed">Authorized aggregate operations, membership invitations, and append-oriented audit evidence.</Text>
+        </div>
+
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
+          {analytics.map((card) => <Card key={card.label} padding="lg" withBorder><Text c="dimmed" size="sm">{card.label}</Text><Text fw={700} size="xl">{card.value}</Text></Card>)}
+        </SimpleGrid>
+
+        <form action={action} method="post">
+          <Card padding="xl" radius="lg" withBorder>
+            <Stack>
+              <Title order={2} size="h3">Create invitation</Title>
+              <Text c="dimmed" size="sm">The resulting bearer link is shown once. Deliver it only to the email address entered here.</Text>
+              <input name="_csrf_token" type="hidden" value={csrfToken} />
+              <TextInput autoComplete="email" label="Email" name="invitation[email]" required type="email" />
+              <NativeSelect data={[
+__IF_TENANCY__
+                "member", "admin", "owner",
+__END_TENANCY__
+__IF_NO_TENANCY__
+                "admin",
+__END_NO_TENANCY__
+              ]} label="Role" name="invitation[role]" />
+              <Button type="submit">Create invitation</Button>
+            </Stack>
+          </Card>
+        </form>
+
+__IF_TENANCY__
+        <MembershipTable csrfToken={csrfToken} memberships={memberships} />
+__END_TENANCY__
+__IF_NO_TENANCY__
+        <RecordTable title="Memberships" empty="No memberships are available." headings={["Email", "Role", "State"]} rows={memberships.map((membership) => [membership.email, membership.role, membership.active ? "active" : "inactive"])} />
+__END_NO_TENANCY__
+        <RecordTable title="Invitations" empty="No invitations are available." headings={["Email", "Role", "State"]} rows={invitations.map((invitation) => [invitation.email, invitation.role, invitation.consumedAt ? "consumed" : invitation.revokedAt ? "revoked" : "active"])} />
+        <RecordTable title="Audit evidence" empty="No audit evidence is available." headings={["When", "Action", "Outcome"]} rows={auditEvents.map((event) => [new Date(event.occurredAt).toLocaleString(), event.action, event.outcome])} />
+      </Stack>
+    </AppLayout>
+  );
+}
+
+__IF_TENANCY__
+function MembershipTable({ csrfToken, memberships }: { csrfToken: string; memberships: Membership[] }) {
+  return (
+    <Card padding="xl" radius="lg" withBorder>
+      <Title order={2} size="h3">Memberships</Title>
+      {memberships.length === 0 ? <Text c="dimmed" mt="md">No memberships are available.</Text> : (
+        <Table.ScrollContainer minWidth={760}>
+          <Table mt="md">
+            <Table.Thead><Table.Tr><Table.Th>Email</Table.Th><Table.Th>State</Table.Th><Table.Th>Role administration</Table.Th></Table.Tr></Table.Thead>
+            <Table.Tbody>{memberships.map((membership) => (
+              <Table.Tr key={membership.id}>
+                <Table.Td>{membership.email}</Table.Td>
+                <Table.Td><Badge color={membership.active ? "green" : "gray"}>{membership.active ? "active" : "inactive"}</Badge></Table.Td>
+                <Table.Td>
+                  <form action={`${window.location.pathname}/memberships/${membership.id}`} method="post">
+                    <input name="_csrf_token" type="hidden" value={csrfToken} />
+                    <input name="_method" type="hidden" value="put" />
+                    <Group wrap="nowrap">
+                      <NativeSelect defaultValue={membership.role} disabled={!membership.active} name="membership[role]" data={["member", "admin", "owner"]} />
+                      <Button disabled={!membership.active} name="membership[action]" size="compact-sm" type="submit" value="change_role">Save role</Button>
+                      <Button color="red" disabled={!membership.active} name="membership[action]" size="compact-sm" type="submit" value="deactivate" variant="light">Deactivate</Button>
+                    </Group>
+                  </form>
+                </Table.Td>
+              </Table.Tr>
+            ))}</Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
+      )}
+    </Card>
+  );
+}
+__END_TENANCY__
+
+function RecordTable({ empty, headings, rows, title }: { empty: string; headings: string[]; rows: string[][]; title: string }) {
+  return (
+    <Card padding="xl" radius="lg" withBorder>
+      <Title order={2} size="h3">{title}</Title>
+      {rows.length === 0 ? <Text c="dimmed" mt="md">{empty}</Text> : (
+        <Table.ScrollContainer minWidth={640}>
+          <Table mt="md">
+            <Table.Thead><Table.Tr>{headings.map((heading) => <Table.Th key={heading}>{heading}</Table.Th>)}</Table.Tr></Table.Thead>
+            <Table.Tbody>{rows.map((row) => <Table.Tr key={row.join(":")}>{row.map((value) => <Table.Td key={value}><Badge variant="light">{value}</Badge></Table.Td>)}</Table.Tr>)}</Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
+      )}
+    </Card>
+  );
+}

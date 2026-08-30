@@ -1,0 +1,31 @@
+defmodule __MODULE__.Communication do
+  @moduledoc "Transactional durable email delivery through the application-owned Oban queue."
+  use Ash.Domain, otp_app: :__APP__
+
+  alias __MODULE__.Communication.{DeliveryEvent, EmailDelivery, EmailWorker, WebhookReceipt}
+  alias __MODULE__.Repo
+
+  resources do
+    resource EmailDelivery
+    resource DeliveryEvent
+    resource WebhookReceipt
+  end
+
+  @spec enqueue_email(map()) :: {:ok, EmailDelivery.t()} | {:error, term()}
+  def enqueue_email(attributes) do
+    Repo.transaction(fn ->
+      with {:ok, delivery} <-
+             EmailDelivery
+             |> Ash.Changeset.for_create(:queue, attributes)
+             |> Ash.create(authorize?: false),
+           {:ok, _job} <-
+             %{delivery_id: delivery.id}
+             |> EmailWorker.new()
+             |> Oban.insert() do
+        delivery
+      else
+        {:error, error} -> Repo.rollback(error)
+      end
+    end)
+  end
+end

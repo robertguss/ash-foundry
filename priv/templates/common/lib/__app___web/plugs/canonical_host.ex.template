@@ -1,0 +1,16 @@
+defmodule __WEB_MODULE__.Plugs.CanonicalHost do
+  @moduledoc "Rejects production requests for hosts other than the configured canonical host."
+  import Plug.Conn
+
+  def init(options), do: options
+
+  def call(conn, _options) do
+    canonical_host = Application.get_env(:__APP__, :canonical_host)
+
+    if canonical_host && conn.host != canonical_host do
+      conn |> send_resp(:misdirected_request, "misdirected request") |> halt()
+    else
+      conn
+    end
+  end
+end

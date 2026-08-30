@@ -1,0 +1,31 @@
+defmodule __MODULE__.Application do
+  @moduledoc false
+  use Application
+
+  @impl true
+  def start(_type, _args) do
+    children = [
+      __WEB_MODULE__.Telemetry,
+      {TelemetryMetricsPrometheus.Core,
+       metrics: __WEB_MODULE__.Telemetry.metrics(), start_async: false},
+      {DNSCluster, query: Application.get_env(:__APP__, :dns_cluster_query) || :ignore},
+      __MODULE__.Repo,
+      {Phoenix.PubSub, name: __MODULE__.PubSub},
+      {Oban, Application.fetch_env!(:__APP__, Oban)},
+      __MODULE__.Operations.ObanReporter,
+__IF_AUTH__
+      __MODULE__.RateLimit,
+      {AshAuthentication.Supervisor, [otp_app: :__APP__]},
+__END_AUTH__
+      __WEB_MODULE__.Endpoint
+    ]
+
+    Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__.Supervisor)
+  end
+
+  @impl true
+  def config_change(changed, _new, removed) do
+    __WEB_MODULE__.Endpoint.config_change(changed, removed)
+    :ok
+  end
+end

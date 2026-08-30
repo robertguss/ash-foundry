@@ -1,0 +1,4 @@
+defmodule __WEB_MODULE__.AuthOverrides do
+  @moduledoc false
+  use AshAuthentication.Phoenix.Overrides
+end

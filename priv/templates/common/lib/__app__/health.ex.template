@@ -1,0 +1,33 @@
+defmodule __MODULE__.Health do
+  @moduledoc "Database and packaged-migration readiness checks."
+
+  @spec ready?() :: boolean()
+  def ready? do
+    expected = expected_migration_versions()
+
+    case __MODULE__.Repo.query("SELECT version FROM schema_migrations", [], log: false) do
+      {:ok, %{rows: rows}} ->
+        applied = MapSet.new(rows, fn [version] -> version end)
+        Enum.all?(expected, &MapSet.member?(applied, &1))
+
+      _error ->
+        false
+    end
+  rescue
+    _error -> false
+  catch
+    :exit, _reason -> false
+  end
+
+  defp expected_migration_versions do
+    :__APP__
+    |> Application.app_dir("priv/repo/migrations")
+    |> File.ls!()
+    |> Enum.flat_map(fn file ->
+      case Integer.parse(file) do
+        {version, "_" <> _name} -> [version]
+        _other -> []
+      end
+    end)
+  end
+end

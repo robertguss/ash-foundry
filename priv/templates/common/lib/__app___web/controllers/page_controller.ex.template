@@ -1,0 +1,7 @@
+defmodule __WEB_MODULE__.PageController do
+  use __WEB_MODULE__, :controller
+
+  def index(conn, _params) do
+    render_inertia(conn, "Dashboard", __WEB_MODULE__.DashboardPresenter.present(conn))
+  end
+end

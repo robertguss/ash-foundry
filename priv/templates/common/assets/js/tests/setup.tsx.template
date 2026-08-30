@@ -1,0 +1,36 @@
+import "@testing-library/jest-dom/vitest";
+
+import type { AnchorHTMLAttributes, PropsWithChildren } from "react";
+import { vi } from "vitest";
+
+Object.defineProperty(window, "matchMedia", {
+  configurable: true,
+  value: vi.fn().mockImplementation((query: string) => ({
+    addEventListener: vi.fn(),
+    addListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+    matches: false,
+    media: query,
+    onchange: null,
+    removeEventListener: vi.fn(),
+    removeListener: vi.fn(),
+  })),
+});
+
+class ResizeObserverMock {
+  disconnect() {}
+  observe() {}
+  unobserve() {}
+}
+
+vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+
+vi.mock("@inertiajs/react", async () => {
+  const actual = await vi.importActual<typeof import("@inertiajs/react")>("@inertiajs/react");
+  return {
+    ...actual,
+    Head: () => null,
+    Link: ({ children, ...props }: PropsWithChildren<AnchorHTMLAttributes<HTMLAnchorElement>>) => <a {...props}>{children}</a>,
+    usePage: () => ({ props: { currentUser: null, currentOrganization: null, organizations: [], requestId: "test" } }),
+  };
+});

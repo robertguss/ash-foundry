@@ -1,0 +1,21 @@
+# Fly.io runbook
+
+1. Change the globally unique `app` and preferred `primary_region` in
+   `fly.toml`; do not deploy the placeholder unchanged.
+2. Create a PostgreSQL 18 cluster, attach it, and confirm `DATABASE_URL` is set.
+3. Set secrets with `fly secrets set`: `PHX_HOST`, `SECRET_KEY_BASE`, and
+   `METRICS_TOKEN` plus the selected authentication/provider values in
+   `docs/deployment.md`.
+4. Run `fly config validate`, review the image, then explicitly deploy. Fly runs
+   `/app/bin/migrate` as the release command before the rolling app update.
+5. Restrict `/metrics` through Fly private networking or another access layer and
+   send `Authorization: Bearer $METRICS_TOKEN`.
+
+The initial system-administrator invitation is an explicit release command:
+
+```sh
+fly ssh console -C "/app/bin/__APP__ eval '__MODULE__.Release.invite_system_admin(\"operator@example.com\")'"
+```
+
+The URL is a 30-minute bearer credential. Deliver it privately and do not retain
+it in operational logs.

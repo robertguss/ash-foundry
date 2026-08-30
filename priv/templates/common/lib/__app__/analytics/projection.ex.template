@@ -1,0 +1,6 @@
+defmodule __MODULE__.Analytics.Projection do
+  @moduledoc "Extension boundary for authorization-scoped aggregate cards over canonical facts."
+
+  @type card :: %{required(:label) => String.t(), required(:value) => number(), optional(:help) => String.t()}
+  @callback cards(actor :: struct(), options :: keyword()) :: [card()]
+end

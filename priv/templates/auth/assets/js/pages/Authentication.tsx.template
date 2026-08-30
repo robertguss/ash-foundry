@@ -1,0 +1,136 @@
+import { Head, Link } from "@inertiajs/react";
+import { Alert, Anchor, Button, Card, Center, Divider, PasswordInput, Stack, Text, TextInput, Title } from "@mantine/core";
+
+type AuthMode = "sign_in" | "register" | "password_reset" | "magic_link" | "confirmation";
+
+type AuthenticationProps = {
+  csrfToken: string;
+  methods: Array<"google" | "password" | "magic_link">;
+  mode: AuthMode;
+  registrationEnabled: boolean;
+  token: string | null;
+};
+
+function Csrf({ token }: { token: string }) {
+  return <input name="_csrf_token" type="hidden" value={token} />;
+}
+
+export default function Authentication({ csrfToken, methods, mode, registrationEnabled, token }: AuthenticationProps) {
+  const password = methods.includes("password");
+  const magicLink = methods.includes("magic_link");
+  const google = methods.includes("google");
+
+  return (
+    <Center mih="100vh" p="xl">
+      <Head title={mode === "register" ? "Create account" : "Sign in"} />
+      <Card maw={460} padding="xl" radius="lg" w="100%" withBorder>
+        <Stack gap="lg">
+          <div>
+            <Title order={1}>{title(mode)}</Title>
+            <Text c="dimmed" mt={4}>{description(mode)}</Text>
+          </div>
+
+          {mode === "sign_in" ? (
+            <>
+              {google ? <Button component="a" href="/auth/user/google" variant="default">Continue with Google</Button> : null}
+              {google && (password || magicLink) ? <Divider label="or" /> : null}
+              {password ? <PasswordSignIn csrfToken={csrfToken} /> : null}
+              {magicLink ? <EmailAction action="/auth/user/magic_link/request" csrfToken={csrfToken} label="Email me a magic link" /> : null}
+              {password ? <EmailAction action="/auth/user/password/reset_request" csrfToken={csrfToken} label="Send password reset" /> : null}
+              {registrationEnabled ? <Anchor component={Link} href="/register">Create an account</Anchor> : null}
+            </>
+          ) : null}
+
+          {mode === "register" && password ? <PasswordRegistration csrfToken={csrfToken} /> : null}
+          {mode === "register" && google ? <Button component="a" href="/auth/user/google" variant="default">Register with Google</Button> : null}
+          {mode === "register" && !password && !google ? <Alert>Request a magic link from the sign-in page to create your account.</Alert> : null}
+
+          {mode === "password_reset" && token ? <PasswordReset csrfToken={csrfToken} token={token} /> : null}
+          {mode === "magic_link" && token ? <TokenAction action="/auth/user/magic_link" csrfToken={csrfToken} field="token" label="Sign in" token={token} /> : null}
+          {mode === "confirmation" && token ? <TokenAction action="/auth/user/confirm_new_user" csrfToken={csrfToken} field="confirm" label="Confirm email" token={token} /> : null}
+
+          {mode !== "sign_in" ? <Anchor component={Link} href="/sign-in">Return to sign in</Anchor> : null}
+        </Stack>
+      </Card>
+    </Center>
+  );
+}
+
+function PasswordSignIn({ csrfToken }: { csrfToken: string }) {
+  return (
+    <form action="/auth/user/password/sign_in" method="post">
+      <Stack>
+        <Csrf token={csrfToken} />
+        <TextInput autoComplete="email" label="Email" name="user[email]" required type="email" />
+        <PasswordInput autoComplete="current-password" label="Password" name="user[password]" required />
+        <Button type="submit">Sign in</Button>
+      </Stack>
+    </form>
+  );
+}
+
+function PasswordRegistration({ csrfToken }: { csrfToken: string }) {
+  return (
+    <form action="/auth/user/password/register" method="post">
+      <Stack>
+        <Csrf token={csrfToken} />
+        <TextInput autoComplete="email" label="Email" name="user[email]" required type="email" />
+        <PasswordInput autoComplete="new-password" label="Password" minLength={12} name="user[password]" required />
+        <PasswordInput autoComplete="new-password" label="Confirm password" minLength={12} name="user[password_confirmation]" required />
+        <Button type="submit">Create account</Button>
+      </Stack>
+    </form>
+  );
+}
+
+function EmailAction({ action, csrfToken, label }: { action: string; csrfToken: string; label: string }) {
+  return (
+    <form action={action} method="post">
+      <Stack gap="xs">
+        <Csrf token={csrfToken} />
+        <TextInput autoComplete="email" label="Email" name="user[email]" required type="email" />
+        <Button type="submit" variant="light">{label}</Button>
+      </Stack>
+    </form>
+  );
+}
+
+function PasswordReset({ csrfToken, token }: { csrfToken: string; token: string }) {
+  return (
+    <form action="/auth/user/password/reset" method="post">
+      <Stack>
+        <Csrf token={csrfToken} />
+        <input name="user[reset_token]" type="hidden" value={token} />
+        <PasswordInput autoComplete="new-password" label="New password" minLength={12} name="user[password]" required />
+        <PasswordInput autoComplete="new-password" label="Confirm new password" minLength={12} name="user[password_confirmation]" required />
+        <Button type="submit">Reset password</Button>
+      </Stack>
+    </form>
+  );
+}
+
+function TokenAction({ action, csrfToken, field, label, token }: { action: string; csrfToken: string; field: string; label: string; token: string }) {
+  return (
+    <form action={action} method="post">
+      <Csrf token={csrfToken} />
+      <input name={`user[${field}]`} type="hidden" value={token} />
+      <Button fullWidth type="submit">{label}</Button>
+    </form>
+  );
+}
+
+function title(mode: AuthMode) {
+  if (mode === "register") return "Create account";
+  if (mode === "password_reset") return "Reset password";
+  if (mode === "magic_link") return "Use your magic link";
+  if (mode === "confirmation") return "Confirm your email";
+  return "Sign in";
+}
+
+function description(mode: AuthMode) {
+  if (mode === "register") return "Use an enabled authentication method to create your account.";
+  if (mode === "password_reset") return "Choose a new password with at least 12 characters.";
+  if (mode === "magic_link") return "Complete this single-use sign-in in the same browser.";
+  if (mode === "confirmation") return "Confirm this single-use email verification request.";
+  return "Authentication responses do not reveal whether an account exists.";
+}

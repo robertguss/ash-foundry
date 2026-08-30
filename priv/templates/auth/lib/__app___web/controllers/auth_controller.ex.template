@@ -1,0 +1,50 @@
+defmodule __WEB_MODULE__.AuthController do
+  use __WEB_MODULE__, :controller
+  use AshAuthentication.Phoenix.Controller
+
+  def success(conn, {_strategy, phase}, nil, _token) when phase in [:request, :reset_request] do
+    conn
+    |> put_flash(:info, "If that account can use this method, instructions have been queued")
+    |> redirect(to: "/sign-in")
+  end
+
+  def success(conn, _activity, %{status: :active} = user, _token) do
+    return_to = get_session(conn, :return_to) || "/"
+    now = System.system_time(:second)
+
+    conn
+    |> configure_session(renew: true)
+    |> delete_session(:return_to)
+    |> store_in_session(user)
+    |> put_session(:session_started_at, now)
+    |> put_session(:session_seen_at, now)
+    |> assign(:current_user, user)
+    |> audit("authentication.succeeded", user)
+    |> redirect(to: return_to)
+  end
+
+  def success(conn, activity, _user, _token), do: failure(conn, activity, :inactive_user)
+
+  def failure(conn, _activity, _reason) do
+    conn
+    |> put_flash(:error, "Sign-in could not be completed")
+    |> redirect(to: "/sign-in")
+  end
+
+  def sign_out(conn, _params) do
+    conn
+    |> clear_session(:__APP__)
+    |> configure_session(drop: true)
+    |> redirect(to: "/sign-in")
+  end
+
+  defp audit(conn, action, user) do
+    attributes = %{action: action, actor_id: user.id, target_type: "user", target_id: user.id, request_id: conn.assigns[:request_id], metadata: %{}}
+
+    __MODULE__.Operations.AuditEvent
+    |> Ash.Changeset.for_create(:record, attributes)
+    |> Ash.create(authorize?: false)
+
+    conn
+  end
+end

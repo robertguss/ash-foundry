@@ -1,0 +1,40 @@
+[tools]
+erlang = "29.0.5"
+elixir = "1.20.4-otp-29"
+node = "24.20.0"
+pnpm = "11.24.0"
+
+[tasks.setup]
+description = "Start local services and prepare the application"
+run = [
+  "docker compose up -d --wait",
+  "mix deps.get",
+  "pnpm --dir assets install --no-frozen-lockfile",
+  "mix ecto.create",
+  "mix ecto.migrate",
+  "mix run priv/repo/seeds.exs"
+]
+
+[tasks.dev]
+description = "Start PostgreSQL, Mailpit, Phoenix, Vite, and Tidewave"
+run = "docker compose up -d --wait && mix phx.server"
+
+[tasks.check]
+description = "Run every local backend, frontend, browser, and release gate"
+run = [
+  "mix format --check-formatted",
+  "mix compile --warnings-as-errors",
+  "mix test",
+  "mix ash.codegen --check",
+  "mix credo --strict",
+  "mix sobelow --strict --skip --exit",
+  "mix hex.audit",
+  "mix deps.audit",
+  "mix dialyzer",
+  "pnpm --dir assets run check",
+  "pnpm --dir assets run test",
+  "pnpm --dir assets run build",
+  "pnpm --dir assets audit --audit-level high",
+  "pnpm --dir assets run test:e2e",
+  "MIX_ENV=prod mix do deps.get --only prod + compile --warnings-as-errors + assets.deploy + release --overwrite"
+]

@@ -1,0 +1,21 @@
+defmodule __MODULE__.RequestBodyReader do
+  @moduledoc false
+  import Plug.Conn
+
+  def read_body(%{request_path: "/webhooks/resend"} = conn, options), do: read_all(conn, options, "")
+  def read_body(conn, options), do: Plug.Conn.read_body(conn, options)
+
+  defp read_all(conn, options, accumulator) do
+    case Plug.Conn.read_body(conn, options) do
+      {:ok, body, conn} ->
+        raw_body = accumulator <> body
+        {:ok, raw_body, assign(conn, :raw_body, raw_body)}
+
+      {:more, body, conn} ->
+        read_all(conn, options, accumulator <> body)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+end

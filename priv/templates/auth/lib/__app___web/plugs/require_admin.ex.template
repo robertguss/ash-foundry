@@ -1,0 +1,13 @@
+defmodule __WEB_MODULE__.Plugs.RequireAdmin do
+  @moduledoc "Restricts administrative surfaces to global or current-organization administrators."
+  import Plug.Conn
+
+  def init(options), do: options
+
+  def call(%{assigns: %{current_user: %{system_admin: true}}} = conn, _options), do: conn
+__IF_NO_TENANCY__
+  def call(%{assigns: %{current_user: %{role: :admin}}} = conn, _options), do: conn
+__END_NO_TENANCY__
+  def call(%{assigns: %{current_membership: %{role: role}}} = conn, _options) when role in [:owner, :admin], do: conn
+  def call(conn, _options), do: conn |> send_resp(:forbidden, "forbidden") |> halt()
+end

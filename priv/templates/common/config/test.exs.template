@@ -1,0 +1,26 @@
+import Config
+
+config :__APP__, __MODULE__.Repo,
+  username: "postgres",
+  password: "postgres",
+  hostname: System.get_env("POSTGRES_HOST", "localhost"),
+  database: "__APP___test#{System.get_env("MIX_TEST_PARTITION")}",
+  pool: Ecto.Adapters.SQL.Sandbox,
+  pool_size: System.schedulers_online() * 2
+
+config :__APP__, __WEB_MODULE__.Endpoint,
+  http: [ip: {127, 0, 0, 1}, port: 4002],
+  secret_key_base: "test-secret-key-base-that-is-never-used-in-production-000000000000000000000",
+  server: System.get_env("PHX_SERVER") == "true"
+
+config :__APP__, Oban, plugins: false, queues: false, testing: :manual
+config :__APP__, __MODULE__.Mailer, adapter: Swoosh.Adapters.Test
+config :__APP__, dev_routes: false
+config :__APP__, dev_personas: false
+config :__APP__, secure_session_cookie: false
+__IF_AUTH__
+config :argon2_elixir, t_cost: 1, m_cost: 8
+__END_AUTH__
+config :hammer, backend: {Hammer.Backend.ETS, [expiry_ms: 60_000, cleanup_interval_ms: 60_000]}
+config :logger, level: :warning
+config :phoenix, :plug_init_mode, :runtime

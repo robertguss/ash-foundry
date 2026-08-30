@@ -1,0 +1,167 @@
+defmodule __WEB_MODULE__.AdminController do
+  use __WEB_MODULE__, :controller
+
+  def index(conn, _params) do
+    actor = conn.assigns.current_user
+    options = ash_options(conn, actor)
+
+    props =
+      __WEB_MODULE__.DashboardPresenter.shared(conn)
+      |> Map.merge(%{
+        analytics: __MODULE__.Analytics.cards(actor, options),
+        audit_events:
+          read_and_present(
+            __MODULE__.Operations.AuditEvent,
+            evidence_options(conn, actor),
+            &present_event/1
+          ),
+        invitations:
+          read_and_present(
+            __MODULE__.Accounts.Invitation,
+            evidence_options(conn, actor),
+            &present_invitation/1
+          ),
+        memberships: memberships(conn, actor),
+        csrf_token: get_csrf_token()
+      })
+
+    render_inertia(conn, "Administration", props)
+  end
+
+  def invite(conn, %{"invitation" => attributes}) do
+    actor = conn.assigns.current_user
+
+    input = %{
+      email: attributes["email"],
+      kind: invitation_kind(conn),
+      role: String.to_existing_atom(attributes["role"]),
+      organization_id: organization_id(conn),
+      expires_in: invitation_expiry(conn)
+    }
+
+    case __MODULE__.Accounts.issue_invitation(input, actor) do
+      {:ok, url} ->
+        conn
+        |> put_flash(:info, "Invitation created. Copy it now: #{url}")
+        |> redirect(to: admin_path(conn))
+
+      {:error, _error} ->
+        conn
+        |> put_flash(:error, "Invitation could not be created")
+        |> redirect(to: admin_path(conn))
+    end
+  rescue
+    ArgumentError -> conn |> put_status(:unprocessable_entity) |> text("invalid invitation role")
+  end
+
+__IF_TENANCY__
+  def update_membership(conn, %{"id" => id, "membership" => attributes}) do
+    actor = conn.assigns.current_user
+    organization = conn.assigns.current_organization
+
+    with {:ok, membership} <-
+           Ash.get(__MODULE__.Organizations.Membership, id,
+             actor: actor,
+             tenant: organization
+           ),
+         {:ok, action, input} <- membership_action(attributes),
+         {:ok, _membership} <-
+           membership
+           |> Ash.Changeset.for_update(action, input, actor: actor, tenant: organization)
+           |> Ash.update(actor: actor, tenant: organization) do
+      redirect(conn, to: admin_path(conn))
+    else
+      _error ->
+        conn
+        |> put_flash(:error, "Membership could not be updated")
+        |> redirect(to: admin_path(conn))
+    end
+  end
+
+  defp membership_action(%{"action" => "deactivate"}), do: {:ok, :deactivate, %{}}
+
+  defp membership_action(%{"role" => role}) do
+    case %{"owner" => :owner, "admin" => :admin, "member" => :member}[role] do
+      nil -> {:error, :invalid_role}
+      selected -> {:ok, :change_role, %{role: selected}}
+    end
+  end
+__END_TENANCY__
+
+  defp read_and_present(resource, options, presenter) do
+    query = resource |> Ash.Query.for_read(:read) |> Ash.Query.limit(50)
+
+    case Ash.read(query, options) do
+      {:ok, records} -> Enum.map(records, presenter)
+      {:error, _error} -> []
+    end
+  end
+
+  defp present_event(event) do
+    %{
+      id: event.id,
+      action: event.action,
+      outcome: event.outcome,
+      reason_code: event.reason_code,
+      actor_id: event.actor_id,
+      target_type: event.target_type,
+      target_id: event.target_id,
+      occurred_at: event.occurred_at
+    }
+  end
+
+  defp present_invitation(invitation) do
+    %{
+      id: invitation.id,
+      email: to_string(invitation.email),
+      kind: invitation.kind,
+      role: invitation.role,
+      expires_at: invitation.expires_at,
+      consumed_at: invitation.consumed_at,
+      revoked_at: invitation.revoked_at
+    }
+  end
+
+__IF_TENANCY__
+  defp ash_options(conn, actor), do: [actor: actor, tenant: conn.assigns.current_organization]
+
+  defp evidence_options(conn, actor) do
+    [actor: actor, filter: [organization_id: conn.assigns.current_organization.id]]
+  end
+
+  defp memberships(conn, actor) do
+    case Ash.read(__MODULE__.Organizations.Membership,
+           actor: actor,
+           tenant: conn.assigns.current_organization,
+           load: [:user]
+         ) do
+      {:ok, memberships} ->
+        Enum.map(memberships, fn membership ->
+          %{
+            id: membership.id,
+            email: to_string(membership.user.email),
+            role: membership.role,
+            active: membership.active
+          }
+        end)
+
+      {:error, _error} ->
+        []
+    end
+  end
+
+  defp invitation_kind(_conn), do: :membership
+  defp organization_id(conn), do: conn.assigns.current_organization.id
+  defp invitation_expiry(_conn), do: 7 * 24 * 60 * 60
+  defp admin_path(conn), do: "/organizations/#{conn.assigns.current_organization.slug}/admin"
+__END_TENANCY__
+__IF_NO_TENANCY__
+  defp ash_options(_conn, actor), do: [actor: actor]
+  defp evidence_options(_conn, actor), do: [actor: actor]
+  defp memberships(_conn, _actor), do: []
+  defp invitation_kind(_conn), do: :system_admin
+  defp organization_id(_conn), do: nil
+  defp invitation_expiry(_conn), do: 30 * 60
+  defp admin_path(_conn), do: "/admin"
+__END_NO_TENANCY__
+end

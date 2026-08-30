@@ -1,0 +1,29 @@
+defmodule __WEB_MODULE__.Plugs.SessionTimeout do
+  @moduledoc "Enforces recipe-specific absolute and idle limits around persisted authentication tokens."
+  import Plug.Conn
+  import Phoenix.Controller
+
+  @absolute_seconds Application.compile_env!(:__APP__, :session_absolute_minutes) * 60
+  @idle_seconds Application.compile_env!(:__APP__, :session_idle_minutes) * 60
+
+  def init(options), do: options
+
+  def call(%{assigns: %{current_user: %{}}} = conn, _options) do
+    now = System.system_time(:second)
+    started_at = get_session(conn, :session_started_at) || now
+    seen_at = get_session(conn, :session_seen_at) || now
+
+    if now - started_at > @absolute_seconds or now - seen_at > @idle_seconds do
+      conn
+      |> configure_session(drop: true)
+      |> redirect(to: "/sign-in")
+      |> halt()
+    else
+      conn
+      |> put_session(:session_started_at, started_at)
+      |> put_session(:session_seen_at, now)
+    end
+  end
+
+  def call(conn, _options), do: conn
+end

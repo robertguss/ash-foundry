@@ -1,0 +1,41 @@
+defmodule __MODULE__.RateLimit do
+  @moduledoc false
+  use Hammer, backend: :ets, algorithm: :fix_window_per_key
+end
+
+defmodule __WEB_MODULE__.Plugs.AuthRateLimit do
+  @moduledoc "Fails sensitive routes closed under both trusted-IP and normalized-identifier limits."
+  import Plug.Conn
+
+  @window_milliseconds :timer.seconds(60)
+  @ip_limit 30
+  @identifier_limit 10
+
+  def init(options), do: options
+
+  def call(conn, _options) do
+    ip_key = "auth:ip:" <> hash(:inet.ntoa(conn.remote_ip) |> to_string())
+    identifier_key = "auth:id:" <> hash(identifier(conn.params))
+
+    with {:allow, _count} <- __MODULE__.RateLimit.hit(ip_key, @window_milliseconds, @ip_limit),
+         {:allow, _count} <-
+           __MODULE__.RateLimit.hit(identifier_key, @window_milliseconds, @identifier_limit) do
+      conn
+    else
+      _denial -> conn |> send_resp(:too_many_requests, "request could not be completed") |> halt()
+    end
+  rescue
+    _error -> conn |> send_resp(:service_unavailable, "request could not be completed") |> halt()
+  catch
+    :exit, _reason -> conn |> send_resp(:service_unavailable, "request could not be completed") |> halt()
+  end
+
+  defp identifier(params) do
+    params["email"] || get_in(params, ["user", "email"]) || get_in(params, ["password", "email"]) || "anonymous"
+    |> to_string()
+    |> String.trim()
+    |> String.downcase()
+  end
+
+  defp hash(value), do: :crypto.hash(:sha256, "__APP__:rate-limit:" <> value) |> Base.url_encode64(padding: false)
+end

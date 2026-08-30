@@ -1,0 +1,49 @@
+defmodule __WEB_MODULE__.Plugs.RequireAdminTest do
+  use ExUnit.Case, async: true
+  import Plug.Conn
+  import Plug.Test
+
+  alias __WEB_MODULE__.Plugs.RequireAdmin
+
+  test "denies ordinary members" do
+    conn =
+      conn(:get, "/admin")
+      |> assign(:current_user, %{role: :member, system_admin: false})
+      |> RequireAdmin.call([])
+
+    assert conn.halted
+    assert conn.status == 403
+  end
+
+  test "allows system administrators" do
+    system_admin =
+      conn(:get, "/admin")
+      |> assign(:current_user, %{role: :member, system_admin: true})
+
+    refute RequireAdmin.call(system_admin, []).halted
+  end
+
+__IF_NO_TENANCY__
+  test "allows non-tenant administrators" do
+    global = conn(:get, "/admin") |> assign(:current_user, %{role: :admin, system_admin: false})
+    refute RequireAdmin.call(global, []).halted
+  end
+__END_NO_TENANCY__
+
+__IF_TENANCY__
+  test "requires the current organization's administrative membership" do
+    global_role_only =
+      conn(:get, "/admin")
+      |> assign(:current_user, %{role: :admin, system_admin: false})
+
+    assert RequireAdmin.call(global_role_only, []).halted
+
+    organization =
+      conn(:get, "/admin")
+      |> assign(:current_user, %{role: :member, system_admin: false})
+      |> assign(:current_membership, %{role: :owner})
+
+    refute RequireAdmin.call(organization, []).halted
+  end
+__END_TENANCY__
+end

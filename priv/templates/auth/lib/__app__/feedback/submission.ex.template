@@ -1,0 +1,106 @@
+defmodule __MODULE__.Feedback.Submission do
+  @moduledoc "Sensitive user feedback with a small, auditable lifecycle and no attachments."
+
+  use Ash.Resource,
+    otp_app: :__APP__,
+    domain: __MODULE__.Feedback,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer]
+
+  postgres do
+    table "feedback_submissions"
+    repo __MODULE__.Repo
+  end
+
+  actions do
+    read :read, primary?: true
+
+    create :submit do
+      accept [
+        :category,
+        :description,
+        :route_context,
+        :reporter_id
+      ]
+
+      change {__MODULE__.Operations.Changes.Audit, action: "feedback.submitted", target_type: "feedback"}
+    end
+
+    update :acknowledge do
+      require_atomic? false
+      accept []
+      change set_attribute(:status, :acknowledged)
+      change set_attribute(:acknowledged_at, &DateTime.utc_now/0)
+      change {__MODULE__.Operations.Changes.Audit, action: "feedback.acknowledged", target_type: "feedback"}
+    end
+
+    update :resolve do
+      require_atomic? false
+      accept [:resolution_note]
+      change set_attribute(:status, :resolved)
+      change set_attribute(:resolved_at, &DateTime.utc_now/0)
+      change {__MODULE__.Operations.Changes.Audit, action: "feedback.resolved", target_type: "feedback"}
+    end
+  end
+
+  policies do
+    bypass actor_attribute_equals(:system_admin, true) do
+      authorize_if always()
+    end
+
+    policy action_type(:read) do
+      forbid_unless actor_present()
+      authorize_if expr(reporter_id == ^actor(:id))
+      authorize_if actor_attribute_equals(:role, :admin)
+__IF_TENANCY__
+      authorize_if expr(exists(organization.memberships, user_id == ^actor(:id) and role in [:owner, :admin] and active == true))
+__END_TENANCY__
+    end
+
+    policy action(:submit) do
+      forbid_unless actor_present()
+__IF_TENANCY__
+      forbid_unless expr(exists(organization.memberships, user_id == ^actor(:id) and active == true))
+__END_TENANCY__
+      authorize_if expr(reporter_id == ^actor(:id))
+    end
+
+    policy action([:acknowledge, :resolve]) do
+      forbid_unless actor_present()
+      authorize_if actor_attribute_equals(:role, :admin)
+__IF_TENANCY__
+      authorize_if expr(exists(organization.memberships, user_id == ^actor(:id) and role in [:owner, :admin] and active == true))
+__END_TENANCY__
+    end
+  end
+
+__IF_TENANCY__
+  multitenancy do
+    strategy :attribute
+    attribute :organization_id
+  end
+__END_TENANCY__
+
+  attributes do
+    uuid_v7_primary_key :id
+    attribute :category, :atom, allow_nil?: false, public?: true, constraints: [one_of: [:bug, :idea, :other]]
+    attribute :description, :string, allow_nil?: false, sensitive?: true, constraints: [min_length: 1, max_length: 5_000, trim?: true]
+    attribute :route_context, :string, allow_nil?: false, public?: true, constraints: [max_length: 300]
+    attribute :status, :atom, allow_nil?: false, default: :new, public?: true, constraints: [one_of: [:new, :acknowledged, :resolved]]
+    attribute :resolution_note, :string, sensitive?: true, constraints: [max_length: 5_000, trim?: true]
+    attribute :acknowledged_at, :utc_datetime_usec, public?: true
+    attribute :resolved_at, :utc_datetime_usec, public?: true
+    timestamps()
+  end
+
+  relationships do
+    belongs_to :reporter, __MODULE__.Accounts.User, allow_nil?: false, public?: true
+__IF_TENANCY__
+    belongs_to :organization, __MODULE__.Organizations.Organization do
+      allow_nil? false
+      public? true
+      attribute_writable? false
+    end
+__END_TENANCY__
+  end
+end

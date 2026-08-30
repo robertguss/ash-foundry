@@ -1,0 +1,13 @@
+defmodule __WEB_MODULE__.ErrorJSONTest do
+  use __WEB_MODULE__.ConnCase, async: true
+
+  test "renders generic errors without exception details" do
+    assert __WEB_MODULE__.ErrorJSON.render("404.json", %{}) == %{
+             errors: %{detail: "Not Found"}
+           }
+
+    assert __WEB_MODULE__.ErrorJSON.render("500.json", %{}) == %{
+             errors: %{detail: "Internal Server Error"}
+           }
+  end
+end

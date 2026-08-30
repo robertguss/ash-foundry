@@ -1,0 +1,45 @@
+import "vite/modulepreload-polyfill";
+import "@mantine/core/styles.css";
+
+import { createInertiaApp, router, type ResolvedComponent } from "@inertiajs/react";
+import { ColorSchemeScript, MantineProvider } from "@mantine/core";
+import axios from "axios";
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+
+import { theme } from "@/theme";
+
+const csrfToken = document
+  .querySelector<HTMLMetaElement>('meta[name="csrf-token"]')
+  ?.getAttribute("content");
+
+if (csrfToken) {
+  axios.defaults.headers.common["x-csrf-token"] = csrfToken;
+  router.on("before", (event) => {
+    event.detail.visit.headers["x-csrf-token"] = csrfToken;
+  });
+}
+
+const pages = import.meta.glob<{ default: ResolvedComponent }>([
+  "./pages/**/*.tsx",
+  "!./pages/**/*.test.tsx",
+]);
+
+void createInertiaApp({
+  resolve: async (name) => {
+    const page = pages[`./pages/${name}.tsx`];
+    if (!page) throw new Error(`Unknown Inertia page: ${name}`);
+    return page();
+  },
+  setup({ App, el, props }) {
+    createRoot(el).render(
+      <StrictMode>
+        <ColorSchemeScript defaultColorScheme="auto" />
+        <MantineProvider defaultColorScheme="auto" theme={theme}>
+          <App {...props} />
+        </MantineProvider>
+      </StrictMode>,
+    );
+  },
+  title: (title) => (title ? `${title} · __MODULE__` : "__MODULE__"),
+});

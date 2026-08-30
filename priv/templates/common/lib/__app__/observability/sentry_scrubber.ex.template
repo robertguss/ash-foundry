@@ -1,0 +1,40 @@
+defmodule __MODULE__.Observability.SentryScrubber do
+  @moduledoc "Removes request, user, job, breadcrumb, and exception values before Sentry transport."
+
+  alias Sentry.Event
+  alias Sentry.Interfaces.Exception, as: SentryException
+  alias Sentry.Interfaces.Stacktrace
+  alias Sentry.Interfaces.Stacktrace.Frame
+
+  @spec before_send(Event.t()) :: Event.t()
+  def before_send(event) do
+    %{
+      event
+      | breadcrumbs: [],
+        contexts: %{},
+        exception: Enum.map(event.exception || [], &scrub_exception/1),
+        extra: %{},
+        message: nil,
+        request: nil,
+        user: nil
+    }
+  end
+
+  @spec final_oban_attempt?(Oban.Job.t()) :: boolean()
+  def final_oban_attempt?(job), do: job.attempt >= job.max_attempts
+
+  defp scrub_exception(%SentryException{stacktrace: stacktrace} = exception) do
+    %{
+      exception
+      | value: "Error details redacted; correlate with request ID",
+        mechanism: scrub_mechanism(exception.mechanism),
+        stacktrace: scrub_stacktrace(stacktrace)
+    }
+  end
+
+  defp scrub_mechanism(nil), do: nil
+  defp scrub_mechanism(mechanism), do: %{mechanism | data: nil, meta: nil}
+  defp scrub_stacktrace(nil), do: nil
+  defp scrub_stacktrace(%Stacktrace{frames: frames} = stacktrace), do: %{stacktrace | frames: Enum.map(frames, &scrub_frame/1)}
+  defp scrub_frame(%Frame{} = frame), do: %{frame | vars: nil}
+end

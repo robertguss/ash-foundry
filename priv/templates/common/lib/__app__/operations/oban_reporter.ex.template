@@ -1,0 +1,57 @@
+defmodule __MODULE__.Operations.ObanReporter do
+  @moduledoc "Persists sanitized terminal Oban outcomes without job arguments."
+  use GenServer
+
+  alias __MODULE__.Operations.{JobExecution, ObanReporter}
+
+  @event [:oban, :job, :stop]
+
+  def start_link(options),
+    do:
+      GenServer.start_link(ObanReporter, options, name: ObanReporter)
+
+  @impl true
+  def init(options) do
+    :telemetry.attach(
+      to_string(ObanReporter),
+      @event,
+      &ObanReporter.handle_event/4,
+      %{}
+    )
+    {:ok, options}
+  end
+
+  @doc false
+  def handle_event(_event, measurements, metadata, _config) do
+    job = metadata.job
+    state = terminal_state(metadata.state, job)
+
+    if state do
+      attributes = %{
+        queue: job.queue,
+        worker: job.worker,
+        state: state,
+        attempt: job.attempt,
+        duration_ms: System.convert_time_unit(measurements.duration, :native, :millisecond),
+        error_code: error_code(metadata)
+      }
+
+      JobExecution
+      |> Ash.Changeset.for_create(:record, attributes)
+      |> Ash.create(authorize?: false)
+    end
+
+    :ok
+  rescue
+    _error -> :ok
+  end
+
+  defp terminal_state(:success, _job), do: :success
+  defp terminal_state(:cancel, _job), do: :cancel
+  defp terminal_state(:discard, _job), do: :discard
+  defp terminal_state(:failure, %{attempt: attempt, max_attempts: max}) when attempt >= max, do: :discard
+  defp terminal_state(_state, _job), do: nil
+
+  defp error_code(%{kind: kind}) when is_atom(kind), do: Atom.to_string(kind)
+  defp error_code(_metadata), do: nil
+end

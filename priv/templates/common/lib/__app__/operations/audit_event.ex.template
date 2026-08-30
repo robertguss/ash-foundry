@@ -1,0 +1,60 @@
+defmodule __MODULE__.Operations.AuditEvent do
+  @moduledoc "Append-oriented, allowlisted security and administrative evidence."
+
+  use Ash.Resource,
+    otp_app: :__APP__,
+    domain: __MODULE__.Operations,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer]
+
+  postgres do
+    table "audit_events"
+    repo __MODULE__.Repo
+  end
+
+  actions do
+    read :read do
+      primary? true
+    end
+
+    create :record do
+      accept [:action, :outcome, :reason_code, :actor_id, :target_type, :target_id, :organization_id, :request_id, :metadata]
+    end
+  end
+
+  policies do
+    policy action_type(:read) do
+      forbid_unless actor_present()
+      authorize_if expr(actor_id == ^actor(:id))
+      authorize_if actor_attribute_equals(:system_admin, true)
+      authorize_if actor_attribute_equals(:role, :admin)
+__IF_TENANCY__
+      authorize_if expr(exists(organization.memberships, user_id == ^actor(:id) and role in [:owner, :admin] and active == true))
+__END_TENANCY__
+    end
+  end
+
+  attributes do
+    uuid_v7_primary_key :id
+    attribute :action, :string, allow_nil?: false, public?: true, constraints: [max_length: 120]
+    attribute :outcome, :atom, allow_nil?: false, default: :success, public?: true, constraints: [one_of: [:success, :denied, :failed]]
+    attribute :reason_code, :string, public?: true, constraints: [max_length: 80]
+    attribute :actor_id, :uuid, public?: true
+    attribute :target_type, :string, public?: true, constraints: [max_length: 80]
+    attribute :target_id, :uuid, public?: true
+    attribute :organization_id, :uuid, public?: true
+    attribute :request_id, :string, public?: true, constraints: [max_length: 120]
+    attribute :metadata, :map, allow_nil?: false, default: %{}, public?: true
+    create_timestamp :occurred_at
+  end
+
+__IF_TENANCY__
+  relationships do
+    belongs_to :organization, __MODULE__.Organizations.Organization do
+      define_attribute? false
+      source_attribute :organization_id
+      allow_nil? true
+    end
+  end
+__END_TENANCY__
+end

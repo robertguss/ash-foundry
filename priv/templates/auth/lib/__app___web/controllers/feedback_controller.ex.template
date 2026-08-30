@@ -1,0 +1,79 @@
+defmodule __WEB_MODULE__.FeedbackController do
+  use __WEB_MODULE__, :controller
+
+  def index(conn, _params) do
+    actor = conn.assigns.current_user
+    options = ash_options(conn, actor)
+
+    case Ash.read(__MODULE__.Feedback.Submission, options) do
+      {:ok, submissions} ->
+        props = Map.merge(__WEB_MODULE__.DashboardPresenter.shared(conn), %{submissions: Enum.map(submissions, &present/1)})
+        render_inertia(conn, "Feedback", props)
+
+      {:error, _error} -> conn |> put_status(:forbidden) |> text("forbidden")
+    end
+  end
+
+  def create(conn, %{"feedback" => feedback}) do
+    actor = conn.assigns.current_user
+
+    input = %{
+      category: feedback["category"],
+      description: feedback["description"],
+      route_context: safe_route(feedback["route_context"]),
+      reporter_id: actor.id
+    }
+
+    changeset =
+      __MODULE__.Feedback.Submission
+      |> Ash.Changeset.for_create(:submit, input, ash_options(conn, actor))
+      |> maybe_set_tenant(conn)
+
+    case changeset
+         |> Ash.create(actor: actor)
+         |> __MODULE__.Analytics.mark_meaningful_action(actor, "feedback.submitted") do
+      {:ok, _submission} -> redirect(conn, to: feedback_path(conn))
+      {:error, _error} -> conn |> put_status(:unprocessable_entity) |> text("feedback could not be submitted")
+    end
+  end
+
+  def update(conn, %{"id" => id, "status" => status}) when status in ["acknowledged", "resolved"] do
+    actor = conn.assigns.current_user
+
+    with {:ok, submission} <- Ash.get(__MODULE__.Feedback.Submission, id, ash_options(conn, actor)),
+         action = if(status == "resolved", do: :resolve, else: :acknowledge),
+         {:ok, _submission} <-
+           submission
+           |> Ash.Changeset.for_update(action, %{}, ash_options(conn, actor))
+           |> Ash.update(actor: actor) do
+      redirect(conn, to: feedback_path(conn))
+    else
+      _error -> conn |> put_status(:forbidden) |> text("forbidden")
+    end
+  end
+
+  defp present(submission) do
+    %{
+      id: submission.id,
+      category: submission.category,
+      description: submission.description,
+      route_context: submission.route_context,
+      status: submission.status,
+      inserted_at: submission.inserted_at
+    }
+  end
+
+  defp safe_route(route) when is_binary(route), do: route |> String.split(["?", "#"], parts: 2) |> hd() |> String.slice(0, 300)
+  defp safe_route(_route), do: "/"
+
+__IF_TENANCY__
+  defp ash_options(conn, actor), do: [actor: actor, tenant: conn.assigns.current_organization]
+  defp maybe_set_tenant(changeset, conn), do: Ash.Changeset.set_tenant(changeset, conn.assigns.current_organization)
+  defp feedback_path(conn), do: "/organizations/#{conn.assigns.current_organization.slug}/feedback"
+__END_TENANCY__
+__IF_NO_TENANCY__
+  defp ash_options(_conn, actor), do: [actor: actor]
+  defp maybe_set_tenant(changeset, _conn), do: changeset
+  defp feedback_path(_conn), do: "/feedback"
+__END_NO_TENANCY__
+end

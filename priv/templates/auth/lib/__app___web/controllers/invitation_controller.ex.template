@@ -1,0 +1,41 @@
+defmodule __WEB_MODULE__.InvitationController do
+  use __WEB_MODULE__, :controller
+
+  def index(conn, _params) do
+    render_inertia(conn, "Invitation", __WEB_MODULE__.DashboardPresenter.shared(conn))
+  end
+
+  def exchange(conn, %{"id" => id, "token" => token}) do
+    with {:ok, invitation} <- __MODULE__.Accounts.verify_invitation(id, token),
+         {:ok, conn} <- accept_or_stage(conn, invitation) do
+      conn
+      |> put_flash(:info, "Invitation verified")
+      |> redirect(to: destination(conn))
+    else
+      _error ->
+        conn
+        |> delete_session(:pending_invitation_id)
+        |> put_flash(:error, "Invitation is invalid, expired, or already used")
+        |> redirect(to: "/invitation")
+    end
+  end
+
+  def exchange(conn, _params) do
+    conn
+    |> put_flash(:error, "Invitation is invalid, expired, or already used")
+    |> redirect(to: "/invitation")
+  end
+
+  defp accept_or_stage(%{assigns: %{current_user: nil}} = conn, invitation),
+    do: {:ok, put_session(conn, :pending_invitation_id, invitation.id)}
+
+  defp accept_or_stage(conn, invitation) do
+    case __MODULE__.Accounts.complete_invitation(invitation.id, conn.assigns.current_user) do
+      {:ok, _user} -> {:ok, delete_session(conn, :pending_invitation_id)}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  defp destination(%{assigns: %{current_user: nil}}), do: "/sign-in"
+  defp destination(_conn), do: "/"
+end

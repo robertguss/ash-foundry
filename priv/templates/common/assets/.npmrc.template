@@ -1,0 +1,5 @@
+engine-strict=true
+strict-peer-dependencies=true
+verify-store-integrity=true
+resolution-mode=lowest-direct
+save-exact=true

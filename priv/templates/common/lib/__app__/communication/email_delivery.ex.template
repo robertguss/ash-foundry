@@ -1,0 +1,71 @@
+defmodule __MODULE__.Communication.EmailDelivery do
+  @moduledoc "Application-owned email content and its durable provider delivery state."
+
+  use Ash.Resource,
+    otp_app: :__APP__,
+    domain: __MODULE__.Communication,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer]
+
+  postgres do
+    table "email_deliveries"
+    repo __MODULE__.Repo
+  end
+
+  actions do
+    read :read, primary?: true
+
+    create :queue do
+      accept [:opaque_id, :idempotency_key, :to, :subject, :text_body, :html_body]
+    end
+
+    update :accepted do
+      require_atomic? false
+      accept [:provider_message_id]
+      change set_attribute(:status, :accepted)
+      change set_attribute(:last_error_code, nil)
+      change increment(:attempts)
+    end
+
+    update :failed do
+      require_atomic? false
+      accept [:last_error_code]
+      change set_attribute(:status, :failed)
+      change increment(:attempts)
+    end
+
+    update :apply_event do
+      require_atomic? false
+      accept [:status]
+    end
+  end
+
+  policies do
+    policy action_type(:read) do
+      forbid_unless actor_present()
+      authorize_if actor_attribute_equals(:system_admin, true)
+      authorize_if actor_attribute_equals(:role, :admin)
+    end
+  end
+
+  attributes do
+    uuid_v7_primary_key :id
+    attribute :opaque_id, :string, allow_nil?: false, public?: true, default: &Ash.UUIDv7.generate/0
+    attribute :idempotency_key, :string, allow_nil?: false, constraints: [min_length: 16, max_length: 200]
+    attribute :to, :ci_string, allow_nil?: false, sensitive?: true
+    attribute :subject, :string, allow_nil?: false, sensitive?: true, constraints: [max_length: 200]
+    attribute :text_body, :string, allow_nil?: false, sensitive?: true
+    attribute :html_body, :string, allow_nil?: false, sensitive?: true
+    attribute :status, :atom, allow_nil?: false, default: :queued, public?: true, constraints: [one_of: [:queued, :accepted, :delivered, :bounced, :complained, :failed]]
+    attribute :provider_message_id, :string, public?: true, constraints: [max_length: 200]
+    attribute :attempts, :integer, allow_nil?: false, default: 0, public?: true
+    attribute :last_error_code, :string, public?: true, constraints: [max_length: 80]
+    timestamps()
+  end
+
+  identities do
+    identity :unique_opaque_id, [:opaque_id]
+    identity :unique_idempotency_key, [:idempotency_key]
+    identity :unique_provider_message, [:provider_message_id], nils_distinct?: true
+  end
+end

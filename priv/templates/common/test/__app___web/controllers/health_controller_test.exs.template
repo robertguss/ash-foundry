@@ -1,0 +1,10 @@
+defmodule __WEB_MODULE__.HealthControllerTest do
+  use __WEB_MODULE__.ConnCase, async: true
+
+  test "liveness does not require a provider or create a session", %{conn: conn} do
+    conn = get(conn, "/healthz")
+
+    assert json_response(conn, 200) == %{"status" => "ok"}
+    assert get_resp_header(conn, "set-cookie") == []
+  end
+end

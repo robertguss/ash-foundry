@@ -1,0 +1,19 @@
+import { Head, Link } from "@inertiajs/react";
+import { Button, Center, Stack, Text, Title } from "@mantine/core";
+
+export type ErrorProps = { status: 403 | 404 | 422 | 500; requestId: string };
+
+export default function Errors({ requestId, status }: ErrorProps) {
+  const title = status === 403 ? "Forbidden" : status === 404 ? "Not found" : status === 422 ? "Could not process request" : "Something went wrong";
+  return (
+    <Center mih="100vh" p="xl">
+      <Head title={title} />
+      <Stack align="center" maw={520} ta="center">
+        <Text c="indigo" fw={750}>{status}</Text>
+        <Title>{title}</Title>
+        <Text c="dimmed">No sensitive details were exposed. Support reference: {requestId}</Text>
+        <Button component={Link} href="/">Return home</Button>
+      </Stack>
+    </Center>
+  );
+}

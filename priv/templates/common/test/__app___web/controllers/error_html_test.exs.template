@@ -1,0 +1,20 @@
+defmodule __WEB_MODULE__.ErrorHTMLTest do
+  use __WEB_MODULE__.ConnCase, async: true
+
+  import Phoenix.Template, only: [render_to_string: 4]
+
+  test "renders a sanitized 404 response with a support identifier" do
+    html =
+      render_to_string(__WEB_MODULE__.ErrorHTML, "404", "html", request_id: "request-123")
+
+    assert html =~ "<main>"
+    assert html =~ "<h1>Not Found</h1>"
+    assert html =~ "<p>Request ID: request-123</p>"
+  end
+
+  test "escapes the support identifier" do
+    html = render_to_string(__WEB_MODULE__.ErrorHTML, "500", "html", request_id: "<secret>")
+    refute html =~ "<secret>"
+    assert html =~ "&lt;secret&gt;"
+  end
+end

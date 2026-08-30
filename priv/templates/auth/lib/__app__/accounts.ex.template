@@ -1,0 +1,201 @@
+defmodule __MODULE__.Accounts do
+  @moduledoc "Accounts, persisted authentication identities, and bearer invitations."
+  use Ash.Domain, otp_app: :__APP__
+  import Ecto.Query
+
+  @pending_invitation_key {__MODULE__, :pending_invitation_id}
+
+  resources do
+    resource __MODULE__.Accounts.User
+    resource __MODULE__.Accounts.Token
+    resource __MODULE__.Accounts.Invitation
+__IF_GOOGLE__
+    resource __MODULE__.Accounts.UserIdentity
+__END_GOOGLE__
+  end
+
+  @spec create_system_admin_invitation(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def create_system_admin_invitation(email) do
+    issue_invitation(%{email: email, kind: :system_admin, role: :admin, expires_in: 30 * 60}, nil)
+  end
+
+  @spec issue_invitation(map(), struct() | nil) :: {:ok, String.t()} | {:error, term()}
+  def issue_invitation(attributes, actor) do
+    with :ok <- authorize_invitation(attributes, actor) do
+      raw_token = :crypto.strong_rand_bytes(32)
+      token = Base.url_encode64(raw_token, padding: false)
+      digest = :crypto.hash(:sha256, raw_token)
+      expires_at = DateTime.add(DateTime.utc_now(), Map.fetch!(attributes, :expires_in), :second)
+
+      input = %{
+        email: attributes.email,
+        kind: attributes.kind,
+        role: attributes.role,
+        organization_id: attributes[:organization_id],
+        token_digest: digest,
+        expires_at: expires_at,
+        created_by_id: actor && actor.id
+      }
+
+      persist_invitation(input, token)
+    end
+  end
+
+  defp persist_invitation(input, token) do
+    __MODULE__.Repo.transaction(fn -> create_invitation(input, token) end)
+    |> case do
+      {:ok, {url, notifications}} ->
+        Ash.Notifier.notify(notifications)
+        {:ok, url}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp create_invitation(input, token) do
+    case __MODULE__.Accounts.Invitation
+         |> Ash.Changeset.for_create(:issue, input)
+         |> Ash.create(authorize?: false, return_notifications?: true) do
+      {:ok, invitation, notifications} ->
+        revoke_active(input, invitation.id)
+        base = __WEB_MODULE__.Endpoint.url() <> "/invitation"
+        {base <> "#token=" <> URI.encode_www_form(token) <> "&id=" <> invitation.id, notifications}
+
+      {:error, error} ->
+        __MODULE__.Repo.rollback(error)
+    end
+  end
+
+  @doc "Validates an invitation bearer without consuming it."
+  @spec verify_invitation(String.t(), String.t()) :: {:ok, map()} | {:error, :invalid}
+  def verify_invitation(id, token) when is_binary(id) and is_binary(token) do
+    supplied_digest =
+      case Base.url_decode64(token, padding: false) do
+        {:ok, decoded} -> :crypto.hash(:sha256, decoded)
+        :error -> :crypto.hash(:sha256, "invalid")
+      end
+
+    rows =
+      __MODULE__.Repo.query!(
+        """
+        SELECT id, email::text, token_digest
+        FROM invitations
+        WHERE id = $1::uuid AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+        """,
+        [Ecto.UUID.dump!(id)]
+      ).rows
+
+    case rows do
+      [[invitation_id, email, stored_digest]] ->
+        if Plug.Crypto.secure_compare(supplied_digest, stored_digest) do
+          {:ok, %{id: Ecto.UUID.load!(invitation_id), email: email}}
+        else
+          {:error, :invalid}
+        end
+
+      [] ->
+        Plug.Crypto.secure_compare(supplied_digest, :crypto.hash(:sha256, "missing"))
+        {:error, :invalid}
+    end
+  rescue
+    _error -> {:error, :invalid}
+  end
+
+  @doc "Makes a previously verified invitation available to the current authentication request."
+  @spec put_pending_invitation(String.t() | nil) :: :ok
+  def put_pending_invitation(invitation_id) do
+    Process.put(@pending_invitation_key, invitation_id)
+    :ok
+  end
+
+  @doc "Consumes one invitation for its verified matching account and applies its bounded grant."
+  @spec complete_invitation(String.t(), struct()) :: {:ok, struct()} | {:error, term()}
+  def complete_invitation(invitation_id, %{confirmed_at: confirmed_at} = user)
+      when not is_nil(confirmed_at) do
+    __MODULE__.Repo.transaction(fn ->
+      case do_complete_invitation(invitation_id, user) do
+        {:ok, accepted_user, notifications} -> {accepted_user, notifications}
+        {:error, error} -> __MODULE__.Repo.rollback(error)
+      end
+    end)
+    |> case do
+      {:ok, {accepted_user, notifications}} ->
+        Ash.Notifier.notify(notifications)
+        {:ok, accepted_user}
+
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def complete_invitation(_invitation_id, _user),
+    do: {:error, "the account email must be verified before accepting an invitation"}
+
+  defp do_complete_invitation(invitation_id, user) do
+    email = user.email |> to_string() |> String.trim() |> String.downcase()
+
+    case __MODULE__.Repo.query!(
+           """
+           UPDATE invitations
+           SET consumed_at = now(), consumed_by_id = $1
+           WHERE id = $2::uuid AND email = $3::citext
+             AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+           RETURNING kind, role, organization_id
+           """,
+           [Ecto.UUID.dump!(user.id), Ecto.UUID.dump!(invitation_id), email]
+         ).rows do
+      [["system_admin", _role, _organization_id]] ->
+        __MODULE__.Repo.query!("UPDATE users SET system_admin = TRUE WHERE id = $1", [Ecto.UUID.dump!(user.id)])
+        {:ok, %{user | system_admin: true}, []}
+
+__IF_TENANCY__
+      [["membership", role, organization_id]] ->
+        organization_id = Ecto.UUID.load!(organization_id)
+
+        case __MODULE__.Organizations.Membership
+             |> Ash.Changeset.for_create(:create, %{user_id: user.id, role: String.to_existing_atom(role)})
+             |> Ash.Changeset.set_tenant(organization_id)
+             |> Ash.create(authorize?: false, return_notifications?: true) do
+          {:ok, _membership, notifications} -> {:ok, user, notifications}
+          {:error, error} -> {:error, error}
+        end
+__END_TENANCY__
+__IF_NO_TENANCY__
+      [["membership", _role, _organization_id]] ->
+        {:error, "membership invitation is invalid for a non-tenant application"}
+__END_NO_TENANCY__
+
+      [] ->
+        {:error, "invitation is invalid, expired, already used, or bound to another email"}
+    end
+  end
+
+  defp authorize_invitation(%{kind: :system_admin}, nil), do: :ok
+  defp authorize_invitation(_attributes, %{system_admin: true}), do: :ok
+
+__IF_TENANCY__
+  defp authorize_invitation(%{kind: :membership, organization_id: organization_id}, actor) do
+    case __MODULE__.Organizations.Membership
+         |> Ash.Query.filter_input(user_id: actor.id, active: true)
+         |> Ash.read(actor: actor, tenant: organization_id) do
+      {:ok, [%{role: role}]} when role in [:owner, :admin] -> :ok
+      _other -> {:error, :forbidden}
+    end
+  end
+__END_TENANCY__
+
+  defp authorize_invitation(_attributes, _actor), do: {:error, :forbidden}
+
+  defp revoke_active(input, keep_id) do
+    query =
+      from invitation in "invitations",
+        where:
+          invitation.email == type(^to_string(input.email), :string) and
+            invitation.kind == type(^to_string(input.kind), :string) and
+            invitation.id != type(^keep_id, Ecto.UUID) and
+            is_nil(invitation.consumed_at) and is_nil(invitation.revoked_at),
+        update: [set: [revoked_at: ^DateTime.utc_now()]]
+
+    __MODULE__.Repo.update_all(query, [])
+  end
+end

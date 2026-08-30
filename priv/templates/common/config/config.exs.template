@@ -1,0 +1,101 @@
+import Config
+
+config :spark,
+  formatter: ["Ash.Resource": [section_order: [:authentication, :user_identity, :postgres]]]
+
+config :ash, known_types: [AshPostgres.Timestamptz, AshPostgres.TimestamptzUsec]
+
+config :__APP__,
+  ash_domains: [
+    __MODULE__.Operations,
+    __MODULE__.AnalyticsDomain,
+    __MODULE__.Communication,
+__IF_AUTH__
+    __MODULE__.Accounts,
+    __MODULE__.Feedback,
+__END_AUTH__
+__IF_TENANCY__
+    __MODULE__.Organizations,
+__END_TENANCY__
+  ],
+  ecto_repos: [__MODULE__.Repo],
+  generators: [timestamp_type: :utc_datetime_usec, binary_id: true],
+  recipe: :__RECIPE__,
+  registration_policy: :__REGISTRATION__,
+  tenancy: :__TENANCY__,
+  session_absolute_minutes: __SESSION_ABSOLUTE_MINUTES__,
+  session_idle_minutes: __SESSION_IDLE_MINUTES__,
+  secure_session_cookie: false,
+  email_from: {"__MODULE_TITLE__", "noreply@example.com"}
+
+config :__APP__, Oban,
+  engine: Oban.Engines.Basic,
+  notifier: Oban.Notifiers.Postgres,
+  plugins: [
+    {Oban.Plugins.Lifeline, rescue_after: {1, :hour}},
+    {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60},
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"15 3 * * *", __MODULE__.Maintenance.RetentionWorker}
+     ]}
+  ],
+  queues: [default: 5, mailers: 3, maintenance: 1],
+  repo: __MODULE__.Repo
+
+config :__APP__, :secure_browser_headers, %{
+  "content-security-policy" =>
+    "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self' data:; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'",
+  "cross-origin-opener-policy" => "same-origin",
+  "cross-origin-resource-policy" => "same-origin",
+  "permissions-policy" => "camera=(), geolocation=(), microphone=(), payment=(), usb=()",
+  "referrer-policy" => "strict-origin-when-cross-origin",
+  "x-content-type-options" => "nosniff",
+  "x-frame-options" => "DENY"
+}
+
+config :inertia,
+  endpoint: __WEB_MODULE__.Endpoint,
+  static_paths: ["/js/app.tsx", "/css/app.css"],
+  camelize_props: true,
+  history: [encrypt: true],
+  ssr: false
+
+config :phoenix_vite, PhoenixVite.Npm,
+  assets: [args: [], cd: Path.expand("../assets", __DIR__)],
+  vite: [
+    args: ~w(exec -- vite),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"MIX_BUILD_PATH" => Mix.Project.build_path()}
+  ]
+
+config :__APP__, __WEB_MODULE__.Endpoint,
+  url: [host: "localhost"],
+  adapter: Bandit.PhoenixAdapter,
+  render_errors: [formats: [html: __WEB_MODULE__.ErrorHTML, json: __WEB_MODULE__.ErrorJSON], layout: false],
+  pubsub_server: __MODULE__.PubSub
+
+config :__APP__, __MODULE__.Mailer, adapter: Swoosh.Adapters.Test
+config :swoosh, :api_client, Swoosh.ApiClient.Req
+__IF_AUTH__
+config :ash_authentication, :http_adapter, {Assent.HTTPAdapter.Req, []}
+__END_AUTH__
+__IF_GOOGLE__
+config :__APP__, :google,
+  client_id: System.get_env("GOOGLE_CLIENT_ID", "development-client-id"),
+  client_secret: System.get_env("GOOGLE_CLIENT_SECRET", "development-client-secret"),
+  redirect_uri: System.get_env("GOOGLE_REDIRECT_URI", "http://localhost:4000/auth/user/google/callback"),
+  hosted_domain: System.get_env("GOOGLE_HOSTED_DOMAIN")
+__END_GOOGLE__
+
+config :sentry,
+  before_send: {__MODULE__.Observability.SentryScrubber, :before_send},
+  dsn: nil,
+  enable_source_code_context: false
+
+config :logger, :default_formatter,
+  format: "$time $metadata[$level] $message\n",
+  metadata: [:request_id, :job_id, :organization_id]
+
+config :phoenix, :json_library, Jason
+
+import_config "#{config_env()}.exs"

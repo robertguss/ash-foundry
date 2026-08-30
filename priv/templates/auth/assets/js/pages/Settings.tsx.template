@@ -1,0 +1,111 @@
+import { Head } from "@inertiajs/react";
+import { Badge, Button, Card, Group, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
+__IF_PASSWORD__
+import { PasswordInput } from "@mantine/core";
+__END_PASSWORD__
+__IF_TENANCY__
+import { TextInput } from "@mantine/core";
+__END_TENANCY__
+
+import { AppLayout } from "@/components/AppLayout";
+
+type Activity = {
+  id: string;
+  action: string;
+  occurredAt: string;
+  outcome: "success" | "denied" | "failed";
+  reasonCode: string | null;
+};
+
+type SettingsProps = {
+  activity: Activity[];
+__IF_TENANCY__
+  canCreateOrganization: boolean;
+__END_TENANCY__
+  csrfToken: string;
+  methods: Array<"google" | "password" | "magic_link">;
+};
+
+__IF_TENANCY__
+export default function Settings({ activity, canCreateOrganization, csrfToken, methods }: SettingsProps) {
+__END_TENANCY__
+__IF_NO_TENANCY__
+export default function Settings({ activity, csrfToken, methods }: SettingsProps) {
+__END_NO_TENANCY__
+  return (
+    <AppLayout>
+      <Head title="Profile and security" />
+      <Stack gap="xl">
+        <div>
+          <Title order={1}>Profile and security</Title>
+          <Text c="dimmed">Review authentication methods, account security, and your recent activity.</Text>
+        </div>
+
+        <SimpleGrid cols={{ base: 1, md: 2 }}>
+          <Card padding="xl" radius="lg" withBorder>
+            <Stack>
+              <Title order={2} size="h3">Authentication methods</Title>
+              <Group>{methods.map((method) => <Badge key={method}>{method.replace("_", " ")}</Badge>)}</Group>
+              <form action="/sign-out" method="post">
+                <input name="_csrf_token" type="hidden" value={csrfToken} />
+                <input name="_method" type="hidden" value="delete" />
+                <Button color="red" type="submit" variant="light">Sign out</Button>
+              </form>
+            </Stack>
+          </Card>
+
+__IF_PASSWORD__
+          <form action="/settings/password" method="post">
+            <Card h="100%" padding="xl" radius="lg" withBorder>
+              <Stack>
+                <Title order={2} size="h3">Change password</Title>
+                <input name="_csrf_token" type="hidden" value={csrfToken} />
+                <input name="_method" type="hidden" value="put" />
+                <PasswordInput autoComplete="current-password" label="Current password" name="security[current_password]" required />
+                <PasswordInput autoComplete="new-password" label="New password" minLength={12} name="security[password]" required />
+                <PasswordInput autoComplete="new-password" label="Confirm new password" minLength={12} name="security[password_confirmation]" required />
+                <Button type="submit">Change password</Button>
+              </Stack>
+            </Card>
+          </form>
+__END_PASSWORD__
+        </SimpleGrid>
+
+__IF_TENANCY__
+        {canCreateOrganization ? (
+          <form action="/organizations" method="post">
+            <Card padding="xl" radius="lg" withBorder>
+              <Stack>
+                <Title order={2} size="h3">Create organization</Title>
+                <Text c="dimmed">Create a URL-scoped organization and become its first owner.</Text>
+                <input name="_csrf_token" type="hidden" value={csrfToken} />
+                <TextInput label="Name" maxLength={120} name="organization[name]" required />
+                <TextInput description="Lowercase letters, numbers, and hyphens" label="URL slug" maxLength={80} name="organization[slug]" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" required />
+                <Button type="submit">Create organization</Button>
+              </Stack>
+            </Card>
+          </form>
+        ) : null}
+__END_TENANCY__
+
+        <Card padding="xl" radius="lg" withBorder>
+          <Title order={2} size="h3">Recent security activity</Title>
+          {activity.length === 0 ? <Text c="dimmed" mt="md">No activity is available yet.</Text> : (
+            <Table.ScrollContainer minWidth={640}>
+              <Table mt="md">
+                <Table.Thead><Table.Tr><Table.Th>When</Table.Th><Table.Th>Action</Table.Th><Table.Th>Outcome</Table.Th></Table.Tr></Table.Thead>
+                <Table.Tbody>{activity.map((event) => (
+                  <Table.Tr key={event.id}>
+                    <Table.Td>{new Date(event.occurredAt).toLocaleString()}</Table.Td>
+                    <Table.Td>{event.action}</Table.Td>
+                    <Table.Td><Badge color={event.outcome === "success" ? "green" : "red"}>{event.outcome}</Badge></Table.Td>
+                  </Table.Tr>
+                ))}</Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          )}
+        </Card>
+      </Stack>
+    </AppLayout>
+  );
+}

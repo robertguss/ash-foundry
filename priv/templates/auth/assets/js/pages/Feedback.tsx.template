@@ -1,0 +1,82 @@
+import { Head, router, useForm } from "@inertiajs/react";
+import { Alert, Button, Card, NativeSelect, Stack, Table, Text, Textarea, Title } from "@mantine/core";
+import type { FormEvent } from "react";
+
+import { AppLayout } from "@/components/AppLayout";
+
+type Submission = {
+  id: string;
+  category: "bug" | "idea" | "other";
+  description: string;
+  routeContext: string;
+  status: "new" | "acknowledged" | "resolved";
+};
+
+export default function Feedback({ submissions }: { submissions: Submission[] }) {
+  const form = useForm({
+    category: "idea",
+    description: "",
+    route_context: window.location.pathname,
+  });
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    form.post(window.location.pathname, { onSuccess: () => form.reset("description") });
+  }
+
+  return (
+    <AppLayout>
+      <Head title="Feedback" />
+      <Stack gap="xl">
+        <div>
+          <Title order={1}>Feedback</Title>
+          <Text c="dimmed">Share a bug or idea. Do not include passwords, secrets, or sensitive customer data.</Text>
+        </div>
+        <Card component="form" onSubmit={submit} padding="xl" radius="lg" withBorder>
+          <Stack>
+            <NativeSelect
+              data={["bug", "idea", "other"]}
+              label="Category"
+              onChange={(event) => form.setData("category", event.currentTarget.value)}
+              value={form.data.category}
+            />
+            <Textarea
+              error={form.errors.description}
+              label="Description"
+              maxLength={5000}
+              minRows={5}
+              onChange={(event) => form.setData("description", event.currentTarget.value)}
+              required
+              value={form.data.description}
+            />
+            <Button loading={form.processing} type="submit">Submit feedback</Button>
+          </Stack>
+        </Card>
+        {submissions.length === 0 ? <Alert title="No feedback yet">Submitted feedback will appear here.</Alert> : (
+          <Table.ScrollContainer minWidth={600}>
+            <Table>
+              <Table.Thead><Table.Tr><Table.Th>Category</Table.Th><Table.Th>Description</Table.Th><Table.Th>Status</Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>
+                {submissions.map((submission) => (
+                  <Table.Tr key={submission.id}>
+                    <Table.Td>{submission.category}</Table.Td>
+                    <Table.Td>{submission.description}</Table.Td>
+                    <Table.Td>
+                      <Button
+                        onClick={() => router.patch(`${window.location.pathname}/${submission.id}`, { status: submission.status === "new" ? "acknowledged" : "resolved" })}
+                        size="compact-sm"
+                        variant="subtle"
+                      >
+                        {submission.status}
+                      </Button>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        )}
+      </Stack>
+    </AppLayout>
+  );
+}

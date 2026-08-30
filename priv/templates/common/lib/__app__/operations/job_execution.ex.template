@@ -1,0 +1,38 @@
+defmodule __MODULE__.Operations.JobExecution do
+  @moduledoc "Sanitized terminal job facts retained independently of Oban's job history."
+
+  use Ash.Resource,
+    otp_app: :__APP__,
+    domain: __MODULE__.Operations,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer]
+
+  postgres do
+    table "job_executions"
+    repo __MODULE__.Repo
+  end
+
+  actions do
+    read :read, primary?: true
+    create :record, accept: [:queue, :worker, :state, :attempt, :duration_ms, :error_code]
+  end
+
+  policies do
+    policy action_type(:read) do
+      forbid_unless actor_present()
+      authorize_if actor_attribute_equals(:system_admin, true)
+      authorize_if actor_attribute_equals(:role, :admin)
+    end
+  end
+
+  attributes do
+    uuid_v7_primary_key :id
+    attribute :queue, :string, allow_nil?: false, public?: true, constraints: [max_length: 80]
+    attribute :worker, :string, allow_nil?: false, public?: true, constraints: [max_length: 160]
+    attribute :state, :atom, allow_nil?: false, public?: true, constraints: [one_of: [:success, :discard, :cancel]]
+    attribute :attempt, :integer, allow_nil?: false, public?: true
+    attribute :duration_ms, :integer, allow_nil?: false, public?: true
+    attribute :error_code, :string, public?: true, constraints: [max_length: 80]
+    create_timestamp :occurred_at
+  end
+end

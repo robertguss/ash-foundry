@@ -1,0 +1,27 @@
+[tools]
+erlang = "29.0.5"
+elixir = "1.20.4-otp-29"
+node = "24.20.0"
+pnpm = "11.24.0"
+
+[tasks.setup]
+description = "Install local package dependencies"
+run = ["mix local.hex --force", "mix local.rebar --force", "mix deps.get", "mix cmd --cd installer mix deps.get"]
+
+[tasks.test]
+description = "Run package and archive tests"
+run = ["mix test", "mix cmd --cd installer mix test"]
+
+[tasks.check]
+description = "Run the complete AshFoundry package gate"
+depends = ["test"]
+run = [
+  "mix format --check-formatted",
+  "mix compile --warnings-as-errors",
+  "mix credo --strict",
+  "mix dialyzer",
+  "mix deps.audit",
+  "mix hex.audit",
+  "mix cmd --cd installer mix format --check-formatted",
+  "mix cmd --cd installer mix compile --warnings-as-errors"
+]

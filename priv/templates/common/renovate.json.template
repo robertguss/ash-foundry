@@ -1,0 +1,37 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard"],
+  "automerge": false,
+  "dependencyDashboard": true,
+  "minimumReleaseAge": "7 days",
+  "lockFileMaintenance": { "enabled": true, "schedule": ["before 5am on monday"] },
+  "schedule": ["before 5am on monday"],
+  "packageRules": [
+    {
+      "description": "Group the Ash ecosystem",
+      "groupName": "Ash Framework",
+      "matchPackageNames": ["ash", "/^ash_/", "picosat_elixir"]
+    },
+    {
+      "description": "Group Phoenix packages",
+      "groupName": "Phoenix",
+      "matchPackageNames": ["phoenix", "/^phoenix_/"]
+    },
+    {
+      "description": "Group React and Mantine",
+      "groupName": "React UI",
+      "matchPackageNames": ["react", "react-dom", "/^@types/react/", "/^@mantine/"]
+    },
+    {
+      "description": "Keep major upgrades isolated",
+      "matchUpdateTypes": ["major"],
+      "groupName": null
+    },
+    {
+      "description": "Do not delay security fixes",
+      "matchCategories": ["security"],
+      "minimumReleaseAge": null,
+      "schedule": ["at any time"]
+    }
+  ]
+}

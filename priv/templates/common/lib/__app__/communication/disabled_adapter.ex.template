@@ -1,0 +1,7 @@
+defmodule __MODULE__.Communication.DisabledAdapter do
+  @moduledoc "Fail-closed production adapter used until Resend credentials are configured."
+  use Swoosh.Adapter
+
+  @impl true
+  def deliver(_email, _config), do: {:error, :email_provider_not_configured}
+end

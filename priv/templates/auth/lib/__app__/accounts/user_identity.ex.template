@@ -1,0 +1,61 @@
+__IF_GOOGLE__
+defmodule __MODULE__.Accounts.UserIdentity do
+  @moduledoc "An issuer/subject binding that intentionally retains no provider credentials."
+
+  use Ash.Resource,
+    otp_app: :__APP__,
+    domain: __MODULE__.Accounts,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [AshAuthentication.UserIdentity]
+
+  user_identity do
+    user_resource __MODULE__.Accounts.User
+  end
+
+  postgres do
+    table "user_identities"
+    repo __MODULE__.Repo
+
+    check_constraints do
+      check_constraint [:access_token, :access_token_expires_at, :refresh_token],
+                       "user_identities_provider_tokens_absent",
+        check: "access_token IS NULL AND access_token_expires_at IS NULL AND refresh_token IS NULL",
+        message: "provider credentials cannot be retained"
+    end
+  end
+
+  actions do
+    create :upsert do
+      argument :user_info, :map, allow_nil?: false, sensitive?: true
+      argument :oauth_tokens, :map, allow_nil?: false, sensitive?: true
+      argument :user_id, Ash.Type.UUIDv7, allow_nil?: false
+      upsert? true
+      upsert_identity :unique_on_strategy_and_uid
+      upsert_fields [:access_token, :access_token_expires_at, :refresh_token]
+      accept [:strategy]
+      change AshAuthentication.UserIdentity.UpsertIdentityChange
+      change __MODULE__.Accounts.Changes.ClearProviderTokens
+    end
+  end
+
+  policies do
+    bypass AshAuthentication.Checks.AshAuthenticationInteraction do
+      authorize_if always()
+    end
+
+    policy always() do
+      forbid_if always()
+    end
+  end
+
+  relationships do
+    belongs_to :user, __MODULE__.Accounts.User do
+      allow_nil? false
+      attribute_type Ash.Type.UUIDv7
+      attribute_writable? true
+      domain __MODULE__.Accounts
+    end
+  end
+end
+__END_GOOGLE__

@@ -1,0 +1,35 @@
+defmodule __MODULE__.Accounts.Token do
+  @moduledoc "Persisted, revocable AshAuthentication tokens."
+
+  use Ash.Resource,
+    otp_app: :__APP__,
+    domain: __MODULE__.Accounts,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [AshAuthentication.TokenResource]
+
+  token do
+    expunge_interval 12
+  end
+
+  postgres do
+    table "tokens"
+    repo __MODULE__.Repo
+
+    custom_indexes do
+      index [:subject]
+    end
+  end
+
+  actions do
+    read :read do
+      primary? true
+    end
+  end
+
+  policies do
+    bypass AshAuthentication.Checks.AshAuthenticationInteraction do
+      authorize_if always()
+    end
+  end
+end

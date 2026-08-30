@@ -1,0 +1,54 @@
+defmodule __MODULE__.Accounts.InvitationTest do
+  use __MODULE__.DataCase, async: true
+
+  alias __MODULE__.Accounts
+  alias __MODULE__.Accounts.User
+
+  test "bootstrap links keep the bearer in a fragment and only its digest at rest" do
+    assert {:ok, url} = Accounts.create_system_admin_invitation("admin@example.com")
+    uri = URI.parse(url)
+
+    assert uri.path == "/invitation"
+    assert uri.query == nil
+
+    values = URI.decode_query(uri.fragment)
+    assert %{"id" => id, "token" => token} = values
+    assert {:ok, %{id: ^id, email: "admin@example.com"}} = Accounts.verify_invitation(id, token)
+    assert {:error, :invalid} = Accounts.verify_invitation(id, token <> "tampered")
+
+    %{rows: [[stored_digest]]} =
+      __MODULE__.Repo.query!("SELECT token_digest FROM invitations WHERE id = $1", [Ecto.UUID.dump!(id)])
+
+    refute stored_digest == token
+    assert stored_digest == :crypto.hash(:sha256, Base.url_decode64!(token, padding: false))
+  end
+
+  test "a confirmed matching account consumes a bootstrap invitation exactly once" do
+    assert {:ok, url} = Accounts.create_system_admin_invitation("admin@example.com")
+    %{"id" => id} = url |> URI.parse() |> Map.fetch!(:fragment) |> URI.decode_query()
+    user = create_confirmed_user("admin@example.com")
+
+    assert {:ok, %{system_admin: true}} = Accounts.complete_invitation(id, user)
+    assert {:error, _error} = Accounts.complete_invitation(id, user)
+
+    %{rows: [[consumed_by_id]]} =
+      __MODULE__.Repo.query!("SELECT consumed_by_id FROM invitations WHERE id = $1", [Ecto.UUID.dump!(id)])
+
+    assert Ecto.UUID.load!(consumed_by_id) == user.id
+  end
+
+  defp create_confirmed_user(email) do
+    id = Ash.UUIDv7.generate()
+    now = DateTime.utc_now()
+
+    __MODULE__.Repo.query!(
+      """
+      INSERT INTO users (id, email, status, role, system_admin, confirmed_at, inserted_at, updated_at)
+      VALUES ($1, $2::citext, 'active', 'member', false, $3, $3, $3)
+      """,
+      [Ecto.UUID.dump!(id), email, now]
+    )
+
+    Ash.get!(User, id, authorize?: false)
+  end
+end

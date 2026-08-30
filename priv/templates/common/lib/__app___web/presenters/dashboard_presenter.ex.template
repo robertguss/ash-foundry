@@ -1,0 +1,73 @@
+defmodule __WEB_MODULE__.DashboardPresenter do
+  @moduledoc "Explicitly allowlists dashboard props; Ash resources are never serialized directly."
+
+  @spec present(Plug.Conn.t()) :: map()
+  def present(conn) do
+    Map.merge(shared(conn), %{
+      analytics: analytics(conn),
+      authenticated: not is_nil(conn.assigns[:current_user]),
+      recipe: "__RECIPE__"
+    })
+  end
+
+  @spec shared(Plug.Conn.t()) :: map()
+  def shared(conn) do
+    actor = conn.assigns[:current_user]
+
+    %{
+      current_user: present_user(actor),
+      current_organization:
+        present_organization(
+          conn.assigns[:current_organization],
+          conn.assigns[:current_membership]
+        ),
+      organizations: organizations(actor),
+      request_id: conn.assigns[:request_id] || "unavailable"
+    }
+  end
+
+  defp present_user(nil), do: nil
+  defp present_user(actor), do: %{id: actor.id, email: to_string(actor.email), role: user_role(actor)}
+
+  defp user_role(%{system_admin: true}), do: :system_admin
+  defp user_role(actor), do: actor.role
+
+  defp present_organization(nil, _membership), do: nil
+
+  defp present_organization(organization, membership) do
+    role = if membership, do: membership.role, else: :member
+    %{id: organization.id, name: organization.name, slug: organization.slug, role: role}
+  end
+
+__IF_TENANCY__
+  defp organizations(nil), do: []
+
+  defp organizations(actor) do
+    case Ash.read(__MODULE__.Organizations.Organization, actor: actor) do
+      {:ok, organizations} -> Enum.map(organizations, &present_organization(&1, nil))
+      {:error, _error} -> []
+    end
+  end
+__END_TENANCY__
+__IF_NO_TENANCY__
+  defp organizations(_actor), do: []
+__END_NO_TENANCY__
+
+__IF_AUTH__
+  defp analytics(%{assigns: %{current_user: actor}} = conn) when not is_nil(actor) do
+    options =
+      case conn.assigns[:current_organization] do
+        nil -> []
+        organization -> [tenant: organization]
+      end
+
+    __MODULE__.Analytics.cards(actor, options)
+  end
+__END_AUTH__
+__IF_NO_AUTH__
+  defp analytics(_conn), do: []
+__END_NO_AUTH__
+__IF_AUTH__
+  defp analytics(_conn), do: []
+__END_AUTH__
+end

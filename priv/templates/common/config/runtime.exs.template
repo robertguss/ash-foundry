@@ -1,0 +1,86 @@
+import Config
+
+if System.get_env("PHX_SERVER") do
+  config :__APP__, __WEB_MODULE__.Endpoint, server: true
+end
+
+config :__APP__, __WEB_MODULE__.Endpoint,
+  http: [
+    ip: {0, 0, 0, 0, 0, 0, 0, 0},
+    port: String.to_integer(System.get_env("PORT", "4000")),
+    thousand_island_options: [read_timeout: 15_000, shutdown_timeout: 30_000]
+  ]
+
+if config_env() == :prod do
+  fetch_secret! = fn name, minimum ->
+    value = System.get_env(name, "") |> String.trim()
+
+    placeholders = ["changeme", "replace-me", "replace-with", "secret", "example"]
+
+    if byte_size(value) < minimum or Enum.any?(placeholders, &String.contains?(String.downcase(value), &1)) do
+      raise "#{name} is absent, blank, a placeholder, or weaker than #{minimum} bytes"
+    end
+
+    value
+  end
+
+  host = fetch_secret!.("PHX_HOST", 4)
+  secret_key_base = fetch_secret!.("SECRET_KEY_BASE", 64)
+  metrics_token = fetch_secret!.("METRICS_TOKEN", 32)
+  database_url = fetch_secret!.("DATABASE_URL", 20)
+
+  config :__APP__, :canonical_host, host
+  config :__APP__, :metrics_token, metrics_token
+  config :__APP__, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
+
+  config :__APP__, __WEB_MODULE__.Endpoint,
+    url: [host: host, port: 443, scheme: "https"],
+    secret_key_base: secret_key_base,
+    check_origin: ["https://#{host}"]
+
+  config :__APP__, __MODULE__.Repo,
+    url: database_url,
+    pool_size: String.to_integer(System.get_env("POOL_SIZE", "10")),
+    socket_options: if(System.get_env("ECTO_IPV6") == "true", do: [:inet6], else: [])
+
+__IF_AUTH__
+  config :__APP__, token_signing_secret: fetch_secret!.("TOKEN_SIGNING_SECRET", 64)
+__END_AUTH__
+__IF_GOOGLE__
+  config :__APP__, :google,
+    client_id: fetch_secret!.("GOOGLE_CLIENT_ID", 8),
+    client_secret: fetch_secret!.("GOOGLE_CLIENT_SECRET", 24),
+    redirect_uri: fetch_secret!.("GOOGLE_REDIRECT_URI", 20),
+__IF_HOSTED_DOMAIN__
+    hosted_domain: fetch_secret!.("GOOGLE_HOSTED_DOMAIN", 4)
+__END_HOSTED_DOMAIN__
+__IF_NOT_HOSTED_DOMAIN__
+    hosted_domain: System.get_env("GOOGLE_HOSTED_DOMAIN")
+__END_NOT_HOSTED_DOMAIN__
+__END_GOOGLE__
+
+  case System.get_env("RESEND_API_KEY", "") |> String.trim() do
+    "" ->
+      config :__APP__, __MODULE__.Mailer, adapter: __MODULE__.Communication.DisabledAdapter
+
+    api_key ->
+      email_from = fetch_secret!.("EMAIL_FROM", 6)
+      webhook_secret = fetch_secret!.("RESEND_WEBHOOK_SECRET", 30)
+
+      unless String.starts_with?(webhook_secret, "whsec_") do
+        raise "RESEND_WEBHOOK_SECRET must be a Resend/Svix whsec_ secret"
+      end
+
+      config :__APP__, __MODULE__.Mailer,
+        adapter: Swoosh.Adapters.Resend,
+        api_key: api_key
+
+      config :__APP__, :email_from, email_from
+      config :__APP__, :resend_webhook_secret, webhook_secret
+  end
+
+  case System.get_env("SENTRY_DSN", "") |> String.trim() do
+    "" -> config :sentry, dsn: nil
+    dsn -> config :sentry, dsn: dsn, environment_name: System.get_env("RELEASE_LEVEL", "production")
+  end
+end

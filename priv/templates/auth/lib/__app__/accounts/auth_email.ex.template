@@ -1,0 +1,20 @@
+defmodule __MODULE__.Accounts.AuthEmail do
+  @moduledoc false
+
+  def deliver(to, subject, text, html, token) do
+    idempotency_key = "auth:" <> Base.url_encode64(:crypto.hash(:sha256, token), padding: false)
+
+    case __MODULE__.Communication.enqueue_email(%{
+           idempotency_key: idempotency_key,
+           to: to_string(to),
+           subject: subject,
+           text_body: text,
+           html_body: html
+         }) do
+      {:ok, _delivery} -> :ok
+      {:error, error} -> raise "could not enqueue authentication email: #{inspect(error)}"
+    end
+  end
+
+  def url(path), do: __WEB_MODULE__.Endpoint.url() <> path
+end

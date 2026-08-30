@@ -1,0 +1,12 @@
+import { MantineProvider } from "@mantine/core";
+import { render, screen } from "@testing-library/react";
+import { axe } from "vitest-axe";
+import { expect, test } from "vitest";
+
+import Feedback from "./Feedback";
+
+test("renders an accessible feedback empty state", async () => {
+  const { container } = render(<MantineProvider><Feedback submissions={[]} /></MantineProvider>);
+  expect(screen.getByRole("heading", { name: "Feedback" })).toBeInTheDocument();
+  expect((await axe(container, { rules: { "color-contrast": { enabled: false } } })).violations).toEqual([]);
+});

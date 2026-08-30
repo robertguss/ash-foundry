@@ -1,0 +1,35 @@
+defmodule __WEB_MODULE__.Plugs.TrustedProxy do
+  @moduledoc "Trusts forwarded client IPs only when the immediate peer is private or loopback."
+  import Plug.Conn
+
+  def init(options), do: options
+
+  def call(conn, _options) do
+    if trusted_peer?(conn.remote_ip) do
+      with [forwarded_for | _rest] <- get_req_header(conn, "x-forwarded-for"),
+           [first | _rest] <- String.split(forwarded_for, ","),
+           {:ok, remote_ip} <- first |> String.trim() |> String.to_charlist() |> :inet.parse_address() do
+        %{conn | remote_ip: remote_ip}
+      else
+        _other -> conn
+      end
+    else
+      delete_forwarded_headers(conn)
+    end
+  end
+
+  defp trusted_peer?({127, _, _, _}), do: true
+  defp trusted_peer?({10, _, _, _}), do: true
+  defp trusted_peer?({192, 168, _, _}), do: true
+  defp trusted_peer?({172, second, _, _}) when second in 16..31, do: true
+  defp trusted_peer?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
+  defp trusted_peer?(_address), do: false
+
+  defp delete_forwarded_headers(conn) do
+    conn
+    |> delete_req_header("forwarded")
+    |> delete_req_header("x-forwarded-for")
+    |> delete_req_header("x-forwarded-host")
+    |> delete_req_header("x-forwarded-proto")
+  end
+end

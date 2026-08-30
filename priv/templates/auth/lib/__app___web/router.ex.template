@@ -1,0 +1,140 @@
+defmodule __WEB_MODULE__.Router do
+  use __WEB_MODULE__, :router
+  use AshAuthentication.Phoenix.Router
+
+  import AshAuthentication.Plug.Helpers
+
+  # BrowserSecurity applies the full configured CSP and secure-header set.
+  # sobelow_skip ["Config.Headers"]
+  pipeline :browser do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {__WEB_MODULE__.Layouts, :root}
+    plug :protect_from_forgery
+    plug __WEB_MODULE__.Plugs.BrowserSecurity
+    plug Inertia.Plug
+    plug :load_from_session
+    plug :set_actor, :user
+    plug __WEB_MODULE__.Plugs.PendingInvitation
+  end
+
+  pipeline :authenticated do
+    plug __WEB_MODULE__.Plugs.RequireAuthentication
+    plug __WEB_MODULE__.Plugs.SessionTimeout
+  end
+
+  pipeline :auth_limited do
+    plug __WEB_MODULE__.Plugs.AuthRateLimit
+  end
+
+  pipeline :admin do
+    plug __WEB_MODULE__.Plugs.RequireAdmin
+  end
+
+__IF_TENANCY__
+  pipeline :organization do
+    plug __WEB_MODULE__.Plugs.LoadOrganization
+  end
+__END_TENANCY__
+
+  pipeline :api do
+    plug :accepts, ["json"]
+  end
+
+  pipeline :metrics do
+    plug :accepts, ["text"]
+    plug __WEB_MODULE__.Plugs.MetricsAuth
+  end
+
+  scope "/", __WEB_MODULE__ do
+    pipe_through [:browser, :auth_limited]
+
+    get "/invitation", InvitationController, :index
+    post "/invitation/exchange", InvitationController, :exchange
+
+    auth_routes AuthController, __MODULE__.Accounts.User, path: "/auth"
+    get "/sign-in", AuthenticationPageController, :sign_in
+__IF_OPEN_REGISTRATION__
+    get "/register", AuthenticationPageController, :register
+__END_OPEN_REGISTRATION__
+__IF_INVITE_ONLY__
+    get "/register", AuthenticationPageController, :register
+__END_INVITE_ONLY__
+__IF_PASSWORD__
+    get "/password-reset/:token", AuthenticationPageController, :password_reset
+__END_PASSWORD__
+__IF_EMAIL_AUTH__
+    get "/confirm_new_user/:token", AuthenticationPageController, :confirmation
+__END_EMAIL_AUTH__
+__IF_MAGIC_LINK__
+    get "/magic_link/:token", AuthenticationPageController, :magic_link
+__END_MAGIC_LINK__
+  end
+
+  scope "/", __WEB_MODULE__ do
+    pipe_through [:browser, :authenticated]
+    delete "/sign-out", AuthController, :sign_out
+    get "/", PageController, :index
+    get "/settings", SettingsController, :index
+__IF_PASSWORD__
+    put "/settings/password", SettingsController, :change_password
+__END_PASSWORD__
+__IF_TENANCY__
+    post "/organizations", OrganizationController, :create
+__END_TENANCY__
+__IF_NO_TENANCY__
+    get "/feedback", FeedbackController, :index
+    post "/feedback", FeedbackController, :create
+    patch "/feedback/:id", FeedbackController, :update
+__END_NO_TENANCY__
+  end
+
+__IF_NO_TENANCY__
+  scope "/admin", __WEB_MODULE__ do
+    pipe_through [:browser, :authenticated, :admin]
+    get "/", AdminController, :index
+    post "/invitations", AdminController, :invite
+  end
+__END_NO_TENANCY__
+
+__IF_TENANCY__
+  scope "/organizations/:organization_slug", __WEB_MODULE__ do
+    pipe_through [:browser, :authenticated, :organization]
+    get "/", PageController, :index
+    get "/feedback", FeedbackController, :index
+    post "/feedback", FeedbackController, :create
+    patch "/feedback/:id", FeedbackController, :update
+  end
+
+  scope "/organizations/:organization_slug/admin", __WEB_MODULE__ do
+    pipe_through [:browser, :authenticated, :organization, :admin]
+    get "/", AdminController, :index
+    post "/invitations", AdminController, :invite
+    put "/memberships/:id", AdminController, :update_membership
+  end
+__END_TENANCY__
+
+  scope "/", __WEB_MODULE__ do
+    pipe_through :api
+    get "/healthz", HealthController, :live
+    get "/readyz", HealthController, :ready
+    post "/webhooks/resend", ResendWebhookController, :create, log: false
+  end
+
+  scope "/", __WEB_MODULE__ do
+    pipe_through :metrics
+    get "/metrics", MetricsController, :index
+  end
+
+  if Application.compile_env(:__APP__, :dev_routes, false) do
+    import Phoenix.LiveDashboard.Router
+
+    scope "/dev" do
+      pipe_through :browser
+      live_dashboard "/dashboard", metrics: __WEB_MODULE__.Telemetry
+      forward "/mailbox", Plug.Swoosh.MailboxPreview
+      post "/personas/:persona", __WEB_MODULE__.DevPersonaController, :create
+    end
+  end
+end

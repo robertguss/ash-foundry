@@ -1,0 +1,26 @@
+defmodule __MODULE__.Operations.Changes.Audit do
+  @moduledoc false
+  use Ash.Resource.Change
+
+  @impl true
+  def change(changeset, options, context) do
+    Ash.Changeset.after_action(changeset, fn _changeset, record ->
+      actor = context.actor
+
+      attributes = %{
+        action: options[:action],
+        actor_id: actor && actor.id,
+        target_type: options[:target_type],
+        target_id: record.id,
+        organization_id: Map.get(record, :organization_id),
+        metadata: %{}
+      }
+
+      __MODULE__.Operations.AuditEvent
+      |> Ash.Changeset.for_create(:record, attributes)
+      |> Ash.create(authorize?: false)
+
+      {:ok, record}
+    end)
+  end
+end

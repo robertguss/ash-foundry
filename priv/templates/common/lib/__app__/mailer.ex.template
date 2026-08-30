@@ -1,0 +1,3 @@
+defmodule __MODULE__.Mailer do
+  use Swoosh.Mailer, otp_app: :__APP__
+end

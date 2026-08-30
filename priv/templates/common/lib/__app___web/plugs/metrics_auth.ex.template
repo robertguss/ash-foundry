@@ -1,0 +1,25 @@
+defmodule __WEB_MODULE__.Plugs.MetricsAuth do
+  @moduledoc "Authenticates Prometheus scrapes with an operator-managed bearer token."
+  import Plug.Conn
+
+  def init(options), do: options
+
+  def call(conn, _options) do
+    expected = Application.get_env(:__APP__, :metrics_token)
+
+    if valid_token?(get_req_header(conn, "authorization"), expected) do
+      conn
+    else
+      conn
+      |> put_resp_header("www-authenticate", "Bearer")
+      |> send_resp(:unauthorized, "unauthorized")
+      |> halt()
+    end
+  end
+
+  defp valid_token?(["Bearer " <> actual], expected) when is_binary(expected) and byte_size(expected) >= 32 do
+    byte_size(actual) == byte_size(expected) and Plug.Crypto.secure_compare(actual, expected)
+  end
+
+  defp valid_token?(_header, _expected), do: false
+end

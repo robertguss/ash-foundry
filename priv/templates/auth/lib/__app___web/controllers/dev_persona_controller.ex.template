@@ -1,0 +1,65 @@
+if Application.compile_env(:__APP__, :dev_personas, false) do
+  defmodule __WEB_MODULE__.DevPersonaController do
+    @moduledoc false
+    use __WEB_MODULE__, :controller
+
+    alias AshAuthentication.Phoenix.Plug, as: AuthenticationPlug
+
+    @personas %{
+      "member" => %{email: "member@example.invalid", role: :member, system_admin: false},
+      "admin" => %{email: "admin@example.invalid", role: :admin, system_admin: false},
+      "system-admin" => %{email: "system-admin@example.invalid", role: :admin, system_admin: true}
+    }
+
+    def create(conn, %{"persona" => name}) do
+      case Map.fetch(@personas, name) do
+        {:ok, attributes} -> sign_in(conn, attributes)
+        :error -> conn |> put_status(:not_found) |> text("unknown development persona")
+      end
+    end
+
+    defp sign_in(conn, attributes) do
+      now = DateTime.utc_now()
+
+      user =
+        case __MODULE__.Accounts.User
+             |> Ash.Query.filter_input(email: attributes.email)
+             |> Ash.read(authorize?: false) do
+          {:ok, [user]} -> user
+          _other -> insert_persona!(attributes, now)
+        end
+
+      {:ok, token, _claims} = AshAuthentication.Jwt.token_for_user(user)
+      user = Ash.Resource.set_metadata(user, %{token: token})
+      unix = System.system_time(:second)
+
+      conn
+      |> configure_session(renew: true)
+      |> AuthenticationPlug.store_in_session(user)
+      |> put_session(:session_started_at, unix)
+      |> put_session(:session_seen_at, unix)
+      |> redirect(to: "/")
+    end
+
+    defp insert_persona!(attributes, now) do
+      id = Ash.UUIDv7.generate()
+
+      {1, [user]} =
+        __MODULE__.Repo.insert_all(
+          __MODULE__.Accounts.User,
+          [
+            Map.merge(attributes, %{
+              id: id,
+              status: :active,
+              confirmed_at: now,
+              inserted_at: now,
+              updated_at: now
+            })
+          ],
+          returning: true
+        )
+
+      user
+    end
+  end
+end

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <.inertia_title><%= assigns[:page_title] || "__MODULE_TITLE__" %></.inertia_title>
+    <.inertia_head content={@inertia_head} />
+    <PhoenixVite.Components.assets
+      names={["js/app.tsx"]}
+      manifest={{:__APP__, "priv/static/.vite/manifest.json"}}
+      dev_server={PhoenixVite.Components.has_vite_watcher?(__WEB_MODULE__.Endpoint)}
+      to_url={
+        if PhoenixVite.Components.has_vite_watcher?(__WEB_MODULE__.Endpoint) do
+          fn path -> static_url(@conn, path) end
+        else
+          fn path -> String.replace_suffix(path, "?vsn=d", "") end
+        end
+      }
+    />
+  </head>
+  <body>
+    {@inner_content}
+  </body>
+</html>

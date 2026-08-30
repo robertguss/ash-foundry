@@ -1,0 +1,36 @@
+defmodule __MODULE__.Communication.WebhookVerifier do
+  @moduledoc "Verifies Resend/Svix HMAC signatures and a five-minute timestamp window."
+
+  @max_age_seconds 300
+
+  @spec verify(binary(), binary(), binary(), binary(), binary()) :: :ok | {:error, atom()}
+  def verify(raw_body, event_id, timestamp, signatures, "whsec_" <> encoded_secret) do
+    with {unix, ""} <- Integer.parse(timestamp),
+         true <- abs(System.system_time(:second) - unix) <= @max_age_seconds,
+         {:ok, secret} <- Base.decode64(encoded_secret),
+         expected <- :crypto.mac(:hmac, :sha256, secret, event_id <> "." <> timestamp <> "." <> raw_body),
+         true <- valid_signature?(signatures, expected) do
+      :ok
+    else
+      _error -> {:error, :invalid_signature}
+    end
+  end
+
+  def verify(_raw_body, _event_id, _timestamp, _signatures, _secret), do: {:error, :invalid_secret}
+
+  defp valid_signature?(signatures, expected) do
+    signatures
+    |> String.split(" ", trim: true)
+    |> Enum.map(&String.split(&1, ",", parts: 2))
+    |> Enum.any?(fn
+      ["v1", encoded] ->
+        case Base.decode64(encoded) do
+          {:ok, actual} when byte_size(actual) == byte_size(expected) -> Plug.Crypto.secure_compare(actual, expected)
+          _error -> false
+        end
+
+      _other ->
+        false
+    end)
+  end
+end

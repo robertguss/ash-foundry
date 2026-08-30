@@ -1,0 +1,40 @@
+import { Head, router } from "@inertiajs/react";
+import { Alert, Center, Loader, Stack, Text, Title } from "@mantine/core";
+import { useEffect, useState } from "react";
+
+export default function Invitation() {
+  const [invalid, setInvalid] = useState(false);
+
+  useEffect(() => {
+    const values = new URLSearchParams(window.location.hash.slice(1));
+    const id = values.get("id");
+    const token = values.get("token");
+
+    window.history.replaceState(null, "", window.location.pathname);
+
+    if (id && token) {
+      router.post("/invitation/exchange", { id, token }, { replace: true });
+    } else {
+      setInvalid(true);
+    }
+  }, []);
+
+  return (
+    <Center mih="100vh" p="xl">
+      <Head title="Accept invitation" />
+      <Stack align="center" maw={520} ta="center">
+        <Title order={1}>Accept invitation</Title>
+        {invalid ? (
+          <Alert color="red" title="Invalid invitation">
+            This link does not contain an invitation credential. Ask an administrator for a new link.
+          </Alert>
+        ) : (
+          <>
+            <Loader aria-label="Verifying invitation" />
+            <Text c="dimmed">Verifying your single-use invitation…</Text>
+          </>
+        )}
+      </Stack>
+    </Center>
+  );
+}

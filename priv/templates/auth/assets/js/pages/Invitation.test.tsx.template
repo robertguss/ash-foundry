@@ -1,0 +1,39 @@
+import { MantineProvider } from "@mantine/core";
+import { render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, expect, test, vi } from "vitest";
+
+import Invitation from "./Invitation";
+
+const { post } = vi.hoisted(() => ({ post: vi.fn() }));
+
+vi.mock("@inertiajs/react", async () => {
+  const actual = await vi.importActual<typeof import("@inertiajs/react")>("@inertiajs/react");
+  return { ...actual, Head: () => null, router: { post } };
+});
+
+beforeEach(() => {
+  post.mockReset();
+  window.history.replaceState(null, "", "/invitation#id=invite-id&token=secret-bearer");
+});
+
+test("removes the fragment before exchanging the invitation bearer", async () => {
+  const replace = vi.spyOn(window.history, "replaceState");
+  render(<MantineProvider><Invitation /></MantineProvider>);
+
+  await waitFor(() => expect(post).toHaveBeenCalledWith(
+    "/invitation/exchange",
+    { id: "invite-id", token: "secret-bearer" },
+    { replace: true },
+  ));
+
+  const [replaceOrder] = replace.mock.invocationCallOrder;
+  const [postOrder] = post.mock.invocationCallOrder;
+
+  if (replaceOrder === undefined || postOrder === undefined) {
+    throw new Error("expected fragment removal and invitation exchange calls");
+  }
+
+  expect(replaceOrder).toBeLessThan(postOrder);
+  expect(window.location.hash).toBe("");
+  expect(screen.getByLabelText("Verifying invitation")).toBeInTheDocument();
+});

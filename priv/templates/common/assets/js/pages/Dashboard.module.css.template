@@ -1,0 +1,24 @@
+.hero {
+  align-items: end;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 2rem;
+}
+
+.eyebrow {
+  color: light-dark(#4c4ad5, #a7a5ff);
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.card {
+  background: light-dark(rgb(255 255 255 / 90%), rgb(27 28 39 / 92%));
+  border: 1px solid light-dark(#e5e6ec, #373845);
+}
+
+@media (max-width: 40rem) {
+  .hero { grid-template-columns: 1fr; }
+}

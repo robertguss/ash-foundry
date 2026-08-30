@@ -1,0 +1,40 @@
+defmodule __MODULE__.Communication.DeliveryEvent do
+  @moduledoc "A sanitized provider lifecycle event for aggregate delivery reporting."
+
+  use Ash.Resource,
+    otp_app: :__APP__,
+    domain: __MODULE__.Communication,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer]
+
+  postgres do
+    table "email_delivery_events"
+    repo __MODULE__.Repo
+  end
+
+  actions do
+    read :read, primary?: true
+    create :record, accept: [:email_delivery_id, :provider_event_id, :event_type, :occurred_at]
+  end
+
+  policies do
+    policy action_type(:read) do
+      forbid_unless actor_present()
+      authorize_if actor_attribute_equals(:system_admin, true)
+      authorize_if actor_attribute_equals(:role, :admin)
+    end
+  end
+
+  attributes do
+    uuid_v7_primary_key :id
+    attribute :email_delivery_id, :uuid, allow_nil?: false
+    attribute :provider_event_id, :string, allow_nil?: false, constraints: [max_length: 200]
+    attribute :event_type, :atom, allow_nil?: false, public?: true, constraints: [one_of: [:delivered, :bounced, :complained]]
+    attribute :occurred_at, :utc_datetime_usec, allow_nil?: false
+    create_timestamp :inserted_at
+  end
+
+  identities do
+    identity :unique_provider_event, [:provider_event_id]
+  end
+end

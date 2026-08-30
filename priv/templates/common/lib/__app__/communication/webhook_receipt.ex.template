@@ -1,0 +1,28 @@
+defmodule __MODULE__.Communication.WebhookReceipt do
+  @moduledoc "Replay-deduplication receipt containing no webhook payload."
+
+  use Ash.Resource,
+    otp_app: :__APP__,
+    domain: __MODULE__.Communication,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer]
+
+  postgres do
+    table "webhook_receipts"
+    repo __MODULE__.Repo
+  end
+
+  actions do
+    create :record, accept: [:provider_event_id]
+  end
+
+  attributes do
+    uuid_v7_primary_key :id
+    attribute :provider_event_id, :string, allow_nil?: false, constraints: [max_length: 200]
+    create_timestamp :inserted_at
+  end
+
+  identities do
+    identity :unique_provider_event, [:provider_event_id]
+  end
+end

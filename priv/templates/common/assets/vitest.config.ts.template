@@ -1,0 +1,11 @@
+import { resolve } from "node:path";
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  resolve: { alias: { "@": resolve(import.meta.dirname, "js") } },
+  test: {
+    environment: "jsdom",
+    include: ["js/**/*.test.{ts,tsx}"],
+    setupFiles: ["./js/tests/setup.tsx"],
+  },
+});

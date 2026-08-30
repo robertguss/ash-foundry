@@ -1,0 +1,14 @@
+defmodule __WEB_MODULE__.Plugs.PendingInvitation do
+  @moduledoc "Copies only a server-verified invitation identifier from encrypted session state."
+  @behaviour Plug
+  import Plug.Conn
+
+  @impl true
+  def init(options), do: options
+
+  @impl true
+  def call(conn, _options) do
+    __MODULE__.Accounts.put_pending_invitation(get_session(conn, :pending_invitation_id))
+    conn
+  end
+end

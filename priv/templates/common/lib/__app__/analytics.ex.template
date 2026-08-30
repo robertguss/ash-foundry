@@ -1,0 +1,55 @@
+defmodule __MODULE__.Analytics do
+  @moduledoc "Aggregate-only first-party analytics conventions."
+
+  @behaviour __MODULE__.Analytics.Projection
+
+  @doc "Returns only aggregate cards the current actor is authorized to count."
+  @spec cards(struct(), keyword()) :: [__MODULE__.Analytics.Projection.card()]
+  @impl true
+  def cards(actor, options \\ []) do
+    [
+__IF_AUTH__
+      card("Accounts", __MODULE__.Accounts.User, actor, options),
+      card("Invitations", __MODULE__.Accounts.Invitation, actor, options),
+      card("Feedback", __MODULE__.Feedback.Submission, actor, options),
+__END_AUTH__
+__IF_TENANCY__
+      card("Organizations", __MODULE__.Organizations.Organization, actor, options),
+      card("Memberships", __MODULE__.Organizations.Membership, actor, options),
+__END_TENANCY__
+      card("Meaningfully active actions", __MODULE__.Analytics.MeaningfulAction, actor, options),
+      card("Completed jobs", __MODULE__.Operations.JobExecution, actor, options),
+      card("Email delivery events", __MODULE__.Communication.DeliveryEvent, actor, options)
+    ]
+    |> Enum.reject(&is_nil/1)
+  end
+
+  @doc "Records a successful meaningful action and always returns the original business result."
+  @spec mark_meaningful_action(term(), struct() | nil, String.t()) :: term()
+  def mark_meaningful_action({:ok, value} = result, %{id: actor_id}, action) when is_binary(action) do
+    __MODULE__.Analytics.MeaningfulAction
+    |> Ash.Changeset.for_create(:record, %{actor_id: actor_id, action: action})
+    |> maybe_set_tenant(value)
+    |> Ash.create(authorize?: false)
+
+    result
+  rescue
+    _error -> result
+  end
+
+  def mark_meaningful_action(result, _actor, _action), do: result
+
+__IF_TENANCY__
+  defp maybe_set_tenant(changeset, value), do: Ash.Changeset.set_tenant(changeset, Map.get(value, :organization_id))
+__END_TENANCY__
+__IF_NO_TENANCY__
+  defp maybe_set_tenant(changeset, _value), do: changeset
+__END_NO_TENANCY__
+
+  defp card(label, resource, actor, options) do
+    case Ash.count(resource, Keyword.put(options, :actor, actor)) do
+      {:ok, count} -> %{label: label, value: count}
+      {:error, _error} -> nil
+    end
+  end
+end

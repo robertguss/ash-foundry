@@ -1,0 +1,84 @@
+defmodule __MODULE__.Organizations.Membership do
+  @moduledoc "A database-constrained tenant role for one account."
+
+  use Ash.Resource,
+    otp_app: :__APP__,
+    domain: __MODULE__.Organizations,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer]
+
+  postgres do
+    table "organization_memberships"
+    repo __MODULE__.Repo
+
+    references do
+      reference :user, on_delete: :delete
+      reference :organization, on_delete: :delete
+    end
+  end
+
+  actions do
+    read :read, primary?: true
+    read :read_all, multitenancy: :allow_global
+    create :create, accept: [:user_id, :role]
+
+    update :change_role do
+      require_atomic? false
+      accept [:role]
+      change __MODULE__.Organizations.Changes.PreventLastOwner
+    end
+
+    update :deactivate do
+      require_atomic? false
+      accept []
+      change __MODULE__.Organizations.Changes.PreventLastOwner
+      change set_attribute(:active, false)
+    end
+  end
+
+  policies do
+    bypass actor_attribute_equals(:system_admin, true) do
+      authorize_if always()
+    end
+
+    policy action_type(:read) do
+      forbid_unless actor_present()
+      authorize_if expr(user_id == ^actor(:id))
+      authorize_if expr(exists(organization.memberships, user_id == ^actor(:id) and role in [:owner, :admin] and active == true))
+    end
+
+    policy action_type([:create, :update]) do
+      forbid_unless actor_present()
+      authorize_if expr(exists(organization.memberships, user_id == ^actor(:id) and role in [:owner, :admin] and active == true))
+    end
+  end
+
+  multitenancy do
+    strategy :attribute
+    attribute :organization_id
+  end
+
+  attributes do
+    uuid_v7_primary_key :id
+    attribute :role, :atom, allow_nil?: false, default: :member, public?: true, constraints: [one_of: [:owner, :admin, :member]]
+    attribute :active, :boolean, allow_nil?: false, default: true, public?: true
+    timestamps()
+  end
+
+  relationships do
+    belongs_to :organization, __MODULE__.Organizations.Organization do
+      allow_nil? false
+      public? true
+      attribute_writable? false
+    end
+
+    belongs_to :user, __MODULE__.Accounts.User do
+      allow_nil? false
+      public? true
+    end
+  end
+
+  identities do
+    identity :unique_organization_user, [:organization_id, :user_id]
+  end
+end

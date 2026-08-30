@@ -1,0 +1,19 @@
+# Render runbook
+
+1. Create a Blueprint from `render.yaml` after reviewing the plan and names.
+2. Set `PHX_HOST` to the exact canonical Render/custom hostname.
+3. Configure selected Google and optional Resend/Sentry credentials.
+4. Keep auto-deploy disabled until the staging checks and migration are reviewed.
+5. Deploy. Render runs `/app/bin/migrate` once as `preDeployCommand`, then starts
+   the combined Phoenix + Oban release and checks `/readyz`.
+6. Configure metrics scraping over Render private networking or another access
+   control, with `Authorization: Bearer $METRICS_TOKEN`.
+
+To create the first system administrator after migration:
+
+```sh
+/app/bin/__APP__ eval '__MODULE__.Release.invite_system_admin("operator@example.com")'
+```
+
+Deliver the displayed 30-minute fragment URL privately. Do not place it in logs,
+email automation, tickets, or chat history.
