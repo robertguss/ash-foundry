@@ -23,6 +23,7 @@ __IF_EMAIL_AUTH__
         confirm_on_update? false
         require_interaction? true
         confirmed_at_field :confirmed_at
+        prevent_hijacking? false
         auto_confirm_actions [
 __IF_PASSWORD__
           :reset_password_with_token,
@@ -50,6 +51,7 @@ __IF_PASSWORD__
       password :password do
         identity_field :email
         hash_provider AshAuthentication.Argon2Provider
+        require_confirmed_with :confirmed_at
 
         resettable do
           sender __MODULE__.Accounts.User.Senders.SendPasswordResetEmail
@@ -100,7 +102,7 @@ __END_GOOGLE__
       get? true
       argument :subject, :string, allow_nil?: false
       prepare AshAuthentication.Preparations.FilterBySubject
-      filter expr(status == :active)
+      filter expr(status == :active and not is_nil(confirmed_at))
     end
 
     read :get_by_email do
@@ -200,7 +202,10 @@ __IF_GOOGLE__
       argument :oauth_tokens, :map, allow_nil?: false, sensitive?: true
       upsert? true
       upsert_identity :unique_email
-      upsert_fields []
+__IF_PASSWORD__
+      upsert_fields [:confirmed_at, :hashed_password]
+      change set_attribute(:hashed_password, nil)
+__END_PASSWORD__
       change AshAuthentication.Strategy.OAuth2.IdentityChange
 
       change fn changeset, _context ->
@@ -253,7 +258,9 @@ __END_GOOGLE__
   attributes do
     uuid_v7_primary_key :id
     attribute :email, :ci_string, allow_nil?: false, public?: true
+__IF_PASSWORD__
     attribute :hashed_password, :string, sensitive?: true
+__END_PASSWORD__
     attribute :confirmed_at, :utc_datetime_usec, public?: true
     attribute :status, :atom, allow_nil?: false, default: :active, public?: true, constraints: [one_of: [:active, :disabled]]
     attribute :role, :atom, allow_nil?: false, default: :member, public?: true, constraints: [one_of: [:admin, :member]]

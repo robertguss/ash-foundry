@@ -68,12 +68,12 @@ __IF_PASSWORD__
 __END_PASSWORD__
 
 __IF_TENANCY__
-__IF_SAAS__
+__IF_OPEN_ORG_CREATE__
   defp can_create_organization?(_actor), do: true
-__END_SAAS__
-__IF_NOT_SAAS__
+__END_OPEN_ORG_CREATE__
+__IF_ADMIN_ORG_CREATE__
   defp can_create_organization?(actor), do: actor.system_admin
-__END_NOT_SAAS__
+__END_ADMIN_ORG_CREATE__
 __END_TENANCY__
 __IF_NO_TENANCY__
   defp can_create_organization?(_actor), do: false

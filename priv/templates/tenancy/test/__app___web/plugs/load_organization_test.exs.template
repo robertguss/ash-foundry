@@ -1,0 +1,15 @@
+defmodule __WEB_MODULE__.Plugs.LoadOrganizationTest do
+  use ExUnit.Case, async: true
+  import Plug.Conn
+  import Plug.Test
+
+  alias __WEB_MODULE__.Plugs.LoadOrganization
+
+  test "rejects requests without an authenticated actor" do
+    conn = conn(:get, "/organizations/acme") |> Map.put(:path_params, %{"organization_slug" => "acme"})
+    halted = LoadOrganization.call(conn, [])
+
+    assert halted.halted
+    assert halted.status == 404
+  end
+end

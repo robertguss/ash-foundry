@@ -25,8 +25,8 @@ if config_env() == :prod do
   end
 
   host = fetch_secret!.("PHX_HOST", 4)
-  secret_key_base = fetch_secret!.("SECRET_KEY_BASE", 64)
-  metrics_token = fetch_secret!.("METRICS_TOKEN", 32)
+    secret_key_base = fetch_secret!.("SECRET_KEY_BASE", 32)
+    metrics_token = fetch_secret!.("METRICS_TOKEN", 32)
   database_url = fetch_secret!.("DATABASE_URL", 20)
 
   config :__APP__, :canonical_host, host
@@ -44,7 +44,7 @@ if config_env() == :prod do
     socket_options: if(System.get_env("ECTO_IPV6") == "true", do: [:inet6], else: [])
 
 __IF_AUTH__
-  config :__APP__, token_signing_secret: fetch_secret!.("TOKEN_SIGNING_SECRET", 64)
+  config :__APP__, token_signing_secret: fetch_secret!.("TOKEN_SIGNING_SECRET", 32)
 __END_AUTH__
 __IF_GOOGLE__
   config :__APP__, :google,

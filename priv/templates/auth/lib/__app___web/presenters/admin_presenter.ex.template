@@ -1,0 +1,92 @@
+defmodule __WEB_MODULE__.AdminPresenter do
+  @moduledoc "Allowlisted administration props. Invitation and audit rows are organization-scoped when tenancy is on."
+
+  require Ash.Query
+
+  @spec props(Plug.Conn.t()) :: map()
+  def props(conn) do
+    actor = conn.assigns.current_user
+
+    __WEB_MODULE__.DashboardPresenter.shared(conn)
+    |> Map.merge(%{
+      analytics: __MODULE__.Analytics.cards(actor, ash_options(conn, actor)),
+      audit_events: read_and_present(__MODULE__.Operations.AuditEvent, conn, actor, &present_event/1),
+      invitations: read_and_present(__MODULE__.Accounts.Invitation, conn, actor, &present_invitation/1),
+      memberships: memberships(conn, actor),
+      csrf_token: Phoenix.Controller.get_csrf_token()
+    })
+  end
+
+  defp read_and_present(resource, conn, actor, presenter) do
+    query =
+      resource
+      |> Ash.Query.for_read(:read)
+      |> scope_evidence(conn)
+      |> Ash.Query.limit(50)
+
+    case Ash.read(query, actor: actor) do
+      {:ok, records} -> Enum.map(records, presenter)
+      {:error, _error} -> []
+    end
+  end
+
+  defp present_event(event) do
+    %{
+      id: event.id,
+      action: event.action,
+      outcome: event.outcome,
+      reason_code: event.reason_code,
+      actor_id: event.actor_id,
+      target_type: event.target_type,
+      target_id: event.target_id,
+      occurred_at: event.occurred_at
+    }
+  end
+
+  defp present_invitation(invitation) do
+    %{
+      id: invitation.id,
+      email: to_string(invitation.email),
+      kind: invitation.kind,
+      role: invitation.role,
+      expires_at: invitation.expires_at,
+      consumed_at: invitation.consumed_at,
+      revoked_at: invitation.revoked_at
+    }
+  end
+
+__IF_TENANCY__
+  defp scope_evidence(query, conn) do
+    organization_id = conn.assigns.current_organization.id
+    Ash.Query.filter(query, organization_id == ^organization_id)
+  end
+
+  defp ash_options(conn, actor), do: [actor: actor, tenant: conn.assigns.current_organization]
+
+  defp memberships(conn, actor) do
+    case Ash.read(__MODULE__.Organizations.Membership,
+           actor: actor,
+           tenant: conn.assigns.current_organization,
+           load: [:user]
+         ) do
+      {:ok, memberships} ->
+        Enum.map(memberships, fn membership ->
+          %{
+            id: membership.id,
+            email: to_string(membership.user.email),
+            role: membership.role,
+            active: membership.active
+          }
+        end)
+
+      {:error, _error} ->
+        []
+    end
+  end
+__END_TENANCY__
+__IF_NO_TENANCY__
+  defp scope_evidence(query, _conn), do: query
+  defp ash_options(_conn, actor), do: [actor: actor]
+  defp memberships(_conn, _actor), do: []
+__END_NO_TENANCY__
+end

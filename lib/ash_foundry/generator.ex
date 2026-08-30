@@ -118,20 +118,22 @@ defmodule AshFoundry.Generator do
     end)
   end
 
+  @doc false
+  @spec template_groups(Plan.t()) :: [String.t()]
+  def template_groups(plan) do
+    groups = ["common", if(plan.auth == [], do: "no_auth", else: "auth")]
+    groups = if(plan.tenancy == :organizations, do: groups ++ ["tenancy"], else: groups)
+
+    if plan.deploy == :none,
+      do: groups,
+      else: groups ++ ["deploy_common", "deploy_#{plan.deploy}"]
+  end
+
   defp template_sources(plan, template_root) do
     plan
     |> template_groups()
     |> Enum.flat_map(&files(Path.join(template_root, &1)))
     |> Enum.sort()
-  end
-
-  defp template_groups(plan) do
-    groups = ["common", if(plan.auth == [], do: "no_auth", else: "auth")]
-    groups = groups ++ [if(plan.tenancy == :organizations, do: "tenancy", else: "no_tenancy")]
-
-    if plan.deploy == :none,
-      do: groups,
-      else: groups ++ ["deploy_common", "deploy_#{plan.deploy}"]
   end
 
   defp files(directory) do

@@ -1,6 +1,8 @@
 defmodule AshFoundryNew.Options do
   @moduledoc false
 
+  alias AshFoundryNew.Selection
+
   @switches [
     recipe: :string,
     auth: :string,
@@ -12,9 +14,6 @@ defmodule AshFoundryNew.Options do
     yes: :boolean
   ]
 
-  @recipes ~w(internal saas personal custom)
-  @deployments ~w(render fly none)
-
   @spec parse!([String.t()], (String.t() -> String.t() | nil)) :: {String.t(), keyword()}
   def parse!(argv, prompt \\ &IO.gets/1) do
     {options, positional} = OptionParser.parse!(argv, strict: @switches)
@@ -25,12 +24,8 @@ defmodule AshFoundryNew.Options do
         _ -> Mix.raise("usage: mix ash_foundry.new APP_NAME [options]")
       end
 
-    interactive? =
-      options[:yes] != true and (is_nil(options[:recipe]) or is_nil(options[:deploy]))
-
-    options = if interactive?, do: wizard(options, prompt), else: options
-    normalized = normalize!(options)
-    {app, normalized}
+    options = if interactive?(options), do: wizard(options, prompt), else: options
+    {app, normalize!(options)}
   end
 
   @spec flags(keyword()) :: [String.t()]
@@ -60,6 +55,16 @@ defmodule AshFoundryNew.Options do
     |> Enum.map_join(" ", &quote_argument/1)
   end
 
+  defp interactive?(options) do
+    options[:yes] != true and
+      (is_nil(options[:recipe]) or is_nil(options[:deploy]) or custom_incomplete?(options))
+  end
+
+  defp custom_incomplete?(options) do
+    options[:recipe] == "custom" and
+      Enum.any?([options[:auth], options[:registration], options[:tenancy]], &is_nil/1)
+  end
+
   defp wizard(options, prompt) do
     IO.puts("\nAshFoundry creates an Ash-first Phoenix application. Press Enter for defaults.\n")
 
@@ -67,7 +72,7 @@ defmodule AshFoundryNew.Options do
       options[:recipe] ||
         ask(prompt, "Recipe [internal/saas/personal/custom] (internal): ", "internal")
 
-    defaults = recipe_defaults(recipe)
+    defaults = Selection.wizard_defaults(recipe)
 
     auth = options[:auth] || ask(prompt, "Authentication (#{defaults.auth}): ", defaults.auth)
 
@@ -113,54 +118,53 @@ defmodule AshFoundryNew.Options do
   end
 
   defp normalize!(options) do
-    recipe = require_enum!(options[:recipe], @recipes, "recipe")
-    deploy = require_enum!(options[:deploy], @deployments, "deploy")
-    defaults = recipe_defaults(recipe)
+    recipe = unwrap!(Selection.enum(options[:recipe], Selection.recipes(), "recipe"))
+    deploy = unwrap!(Selection.enum(options[:deploy], Selection.deployments(), "deploy"))
+    defaults = Selection.wizard_defaults(Atom.to_string(recipe))
 
     auth = options[:auth] || defaults.auth
     registration = options[:registration] || defaults.registration
     tenancy = options[:tenancy] || defaults.tenancy
 
-    if recipe == "custom" and
+    if recipe == :custom and
          Enum.any?([options[:auth], options[:registration], options[:tenancy]], &is_nil/1) do
       Mix.raise("custom recipe requires --auth, --registration, and --tenancy")
     end
 
+    parsed_auth = unwrap!(Selection.auth(auth))
+
+    parsed_registration =
+      unwrap!(Selection.enum(registration, Selection.registrations(), "registration"))
+
+    parsed_tenancy = unwrap!(Selection.enum(tenancy, Selection.tenancies(), "tenancy"))
+
+    hosted =
+      String.contains?(auth, "google") and
+        Keyword.get(options, :google_hosted_domain, defaults.hosted)
+
+    unwrap!(
+      Selection.validate_combination(
+        parsed_auth,
+        parsed_registration,
+        parsed_tenancy,
+        options[:google_hosted_domain] == true
+      )
+    )
+
     [
-      recipe: recipe,
+      recipe: Atom.to_string(recipe),
       auth: auth,
       registration: registration,
       tenancy: tenancy,
-      deploy: deploy,
+      deploy: Atom.to_string(deploy),
       module: options[:module],
-      google_hosted_domain:
-        String.contains?(auth, "google") and
-          Keyword.get(options, :google_hosted_domain, defaults.hosted)
+      google_hosted_domain: hosted
     ]
   end
 
-  defp recipe_defaults("internal"),
-    do: %{auth: "google", registration: "invite-only", tenancy: "none", hosted: true}
-
-  defp recipe_defaults("saas"),
-    do: %{auth: "google,password", registration: "open", tenancy: "organizations", hosted: false}
-
-  defp recipe_defaults("personal"),
-    do: %{auth: "password,magic-link", registration: "open", tenancy: "none", hosted: false}
-
-  defp recipe_defaults("custom"),
-    do: %{auth: "none", registration: "closed", tenancy: "none", hosted: false}
-
-  defp recipe_defaults(other),
-    do: Mix.raise("recipe must be one of #{Enum.join(@recipes, ", ")}; got #{inspect(other)}")
-
-  defp require_enum!(nil, _allowed, name), do: Mix.raise("--#{name} is required")
-
-  defp require_enum!(value, allowed, name) do
-    if value in allowed,
-      do: value,
-      else: Mix.raise("#{name} must be one of #{Enum.join(allowed, ", ")}")
-  end
+  defp unwrap!({:ok, value}), do: value
+  defp unwrap!({:error, message}), do: Mix.raise(message)
+  defp unwrap!(:ok), do: :ok
 
   defp ask(prompt, message, default) do
     case prompt.(message) do

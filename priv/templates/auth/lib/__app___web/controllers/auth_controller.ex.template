@@ -8,7 +8,15 @@ defmodule __WEB_MODULE__.AuthController do
     |> redirect(to: "/sign-in")
   end
 
-  def success(conn, _activity, %{status: :active} = user, _token) do
+  def success(conn, {_strategy, phase}, %{status: :active, confirmed_at: nil}, _token)
+      when phase in [:register, :sign_in] do
+    conn
+    |> put_flash(:info, "Confirm the account from the email we sent before signing in")
+    |> redirect(to: "/sign-in")
+  end
+
+  def success(conn, _activity, %{status: :active, confirmed_at: confirmed_at} = user, _token)
+      when not is_nil(confirmed_at) do
     return_to = get_session(conn, :return_to) || "/"
     now = System.system_time(:second)
 
@@ -25,9 +33,9 @@ defmodule __WEB_MODULE__.AuthController do
 
   def success(conn, activity, _user, _token), do: failure(conn, activity, :inactive_user)
 
-  def failure(conn, _activity, _reason) do
+  def failure(conn, _activity, reason) do
     conn
-    |> put_flash(:error, "Sign-in could not be completed")
+    |> put_flash(:error, failure_message(reason))
     |> redirect(to: "/sign-in")
   end
 
@@ -38,8 +46,13 @@ defmodule __WEB_MODULE__.AuthController do
     |> redirect(to: "/sign-in")
   end
 
+  defp failure_message(%AshAuthentication.Errors.UnconfirmedUser{}),
+    do: "Confirm the account from the email we sent before signing in"
+
+  defp failure_message(_reason), do: "Sign-in could not be completed"
+
   defp audit(conn, action, user) do
-    attributes = %{action: action, actor_id: user.id, target_type: "user", target_id: user.id, request_id: conn.assigns[:request_id], metadata: %{}}
+    attributes = %{action: action, outcome: :success, actor_id: user.id, target_type: "user", target_id: user.id, request_id: conn.assigns[:request_id], metadata: %{}}
 
     __MODULE__.Operations.AuditEvent
     |> Ash.Changeset.for_create(:record, attributes)

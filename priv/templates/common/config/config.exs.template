@@ -78,6 +78,7 @@ config :__APP__, __MODULE__.Mailer, adapter: Swoosh.Adapters.Test
 config :swoosh, :api_client, Swoosh.ApiClient.Req
 __IF_AUTH__
 config :ash_authentication, :http_adapter, {Assent.HTTPAdapter.Req, []}
+config :__APP__, token_signing_secret: String.duplicate("d", 64)
 __END_AUTH__
 __IF_GOOGLE__
 config :__APP__, :google,

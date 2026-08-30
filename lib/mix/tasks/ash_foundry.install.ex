@@ -38,7 +38,9 @@ if Code.ensure_loaded?(Igniter) do
         aliases: [],
         required: [],
         composes: [],
-        installs: @base_installs ++ if(auth_enabled?(argv), do: @auth_installs, else: []),
+        installs:
+          @base_installs ++
+            if(Plan.auth_enabled?(install_options(argv)), do: @auth_installs, else: []),
         adds_deps: []
       }
     end
@@ -50,7 +52,7 @@ if Code.ensure_loaded?(Igniter) do
       Generator.generate(igniter, plan)
     end
 
-    defp auth_enabled?(argv) do
+    defp install_options(argv) do
       {options, _remaining, _invalid} =
         OptionParser.parse(argv,
           strict: [
@@ -67,11 +69,7 @@ if Code.ensure_loaded?(Igniter) do
           ]
         )
 
-      case options[:auth] do
-        "none" -> false
-        nil -> options[:recipe] != "custom"
-        _selection -> true
-      end
+      options
     end
   end
 else

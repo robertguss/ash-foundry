@@ -9,7 +9,7 @@ export type CurrentUser = {
 export type OrganizationSummary = {
   id: string;
   name: string;
-  role: "owner" | "admin" | "member";
+  role: "owner" | "admin" | "member" | "system_admin";
   slug: string;
 };
 

@@ -55,4 +55,41 @@ defmodule AshFoundryNew.OptionsTest do
     assert List.ends_with?(Options.flags(options), ["--ash-foundry-module", "AcmePortal"])
     assert Options.command("portal", options) =~ "--module AcmePortal"
   end
+
+  test "rejects invalid combinations before igniter.new runs" do
+    assert_raise Mix.Error, ~r/no-auth applications require/, fn ->
+      Options.parse!(
+        ~w(tool --recipe custom --auth none --registration open --tenancy none --deploy none --yes)
+      )
+    end
+
+    assert_raise Mix.Error, ~r/do not support organization tenancy/, fn ->
+      Options.parse!(
+        ~w(tool --recipe custom --auth none --registration closed --tenancy organizations --deploy none --yes)
+      )
+    end
+
+    assert_raise Mix.Error, ~r/requires google authentication/, fn ->
+      Options.parse!(~w(journal --recipe personal --deploy none --google-hosted-domain --yes))
+    end
+
+    assert_raise Mix.Error, ~r/auth must be a comma-separated subset/, fn ->
+      Options.parse!(
+        ~w(tool --recipe custom --auth bananas --registration closed --tenancy none --deploy none --yes)
+      )
+    end
+  end
+
+  test "custom without capability flags still opens the wizard" do
+    answers = Agent.start_link(fn -> ["none", "closed", "none"] end) |> elem(1)
+
+    prompt = fn _message ->
+      Agent.get_and_update(answers, fn [answer | rest] -> {answer <> "\n", rest} end)
+    end
+
+    {_app, options} = Options.parse!(~w(tool --recipe custom --deploy none), prompt)
+    assert options[:auth] == "none"
+    assert options[:registration] == "closed"
+    assert options[:tenancy] == "none"
+  end
 end
